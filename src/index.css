@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+@media print {
+  @page {
+    size: auto;
+    margin: 15mm;
+  }
+  
+  body {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    background-color: white !important;
+  }
+
+  /* Prevent page breaks inside cards */
+  .bg-white {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+}
+
+@media print {
+  .recharts-responsive-container,
+  .recharts-wrapper {
+    width: 100% !important;
+  }
+}

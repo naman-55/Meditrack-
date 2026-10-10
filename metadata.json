@@ -1,0 +1,10 @@
+{
+  "name": "MediTrack V2.0",
+  "description": "Clinical biomarker tracking, health risk analysis, and live nearby medical specialists map.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
