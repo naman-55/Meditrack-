@@ -1,5 +1,388 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *, .dark, .dark *, .dark-mode, .dark-mode *));
+
+:root {
+  color-scheme: light;
+  --background: #f5f8fc;
+  --foreground: #071b49;
+  --sidebar-bg: #ffffff;
+  --header-bg: #ffffff;
+  --card: #ffffff;
+  --card-foreground: #071b49;
+  --card-elevated: #f8fafc;
+  --popover: #ffffff;
+  --popover-foreground: #071b49;
+  --primary: #00a884;
+  --primary-hover: #009272;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f5f9;
+  --secondary-foreground: #071b49;
+  --muted: #f8fafc;
+  --muted-foreground: #64748b;
+  --text-muted: #94a3b8;
+  --text-disabled: #94a3b8;
+  --accent: #e6f7f3;
+  --accent-teal: #00a884;
+  --border: #dce5ec;
+  --input: #ffffff;
+  --input-focus-border: #00a884;
+  --ring: #00a884;
+  --hover: #f1f5f9;
+  --success: #059669;
+  --warning: #d97706;
+  --danger: #e11d48;
+  --info: #2563eb;
+  --chart-grid: #e2e8f0;
+  --chart-label: #64748b;
+  --chart-tooltip: #ffffff;
+  --chart-tooltip-foreground: #334155;
+  --chart-dot-outline: #ffffff;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+.dark,
+.dark-mode,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #050d18;
+  --foreground: #f1f5fb;
+  --sidebar-bg: #000000;
+  --sidebar-border: #172536;
+  --header-bg: #0b1624;
+  --card: #0d1b2a;
+  --card-foreground: #f1f5fb;
+  --card-elevated: #102033;
+  --table-header: #112236;
+  --table-row: #07111d;
+  --popover: #102033;
+  --popover-foreground: #f1f5fb;
+  --primary: #00d6b0;
+  --primary-hover: #00a88f;
+  --primary-foreground: #050d18;
+  --secondary: #102033;
+  --secondary-foreground: #f1f5fb;
+  --muted: #102033;
+  --muted-foreground: #b4c4d8;
+  --text-muted: #8297b2;
+  --text-disabled: #526780;
+  --accent: #062e2d;
+  --accent-teal: #00d6b0;
+  --border: #20364a;
+  --input: #102033;
+  --input-focus-border: #00d6b0;
+  --ring: #00d6b0;
+  --hover: #162a3e;
+  --success: #20d6a1;
+  --warning: #f5b942;
+  --danger: #ff5368;
+  --info: #2684ff;
+  --chart-grid: #20364a;
+  --chart-label: #8297b2;
+  --chart-tooltip: #102033;
+  --chart-tooltip-foreground: #f1f5fb;
+  --chart-dot-outline: #0d1b2a;
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+.dark body,
+.dark-mode body,
+:root[data-theme="dark"] body {
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+/* Structural Layout Surfaces */
+.dark header,
+.dark-mode header,
+:root[data-theme="dark"] header {
+  background-color: var(--header-bg) !important;
+  border-color: var(--border) !important;
+}
+
+.dark aside,
+.dark-mode aside,
+:root[data-theme="dark"] aside,
+.dark [data-sidebar="true"],
+.dark-mode [data-sidebar="true"],
+:root[data-theme="dark"] [data-sidebar="true"] {
+  background-color: #000000 !important;
+  border-color: #172536 !important;
+}
+
+/* Global Dark Theme Component Surfaces */
+.dark-mode [class*="bg-white"],
+.dark-mode [class*="bg-[#FFFFFF]"] {
+  background-color: var(--card) !important;
+}
+
+.dark-mode [class*="bg-slate-50"],
+.dark-mode [class*="bg-gray-50"],
+.dark-mode [class*="bg-[#F5F8FC]"],
+.dark-mode [class*="bg-[#F7F9FB]"] {
+  background-color: var(--background) !important;
+}
+
+.dark-mode [class*="bg-slate-100"],
+.dark-mode [class*="bg-gray-100"],
+.dark-mode [class*="bg-[#F8FAFC]"],
+.dark-mode [class*="bg-[#F1F5F9]"] {
+  background-color: var(--secondary) !important;
+}
+
+.dark-mode [class*="bg-slate-200"],
+.dark-mode [class*="bg-gray-200"] {
+  background-color: #14283b !important;
+}
+
+/* Colored accent surfaces for cards/badges */
+.dark-mode [class*="bg-emerald-50"],
+.dark-mode [class*="bg-emerald-100"],
+.dark-mode [class*="bg-teal-50"],
+.dark-mode [class*="bg-teal-100"],
+.dark-mode [class*="bg-[#F0FDF9]"],
+.dark-mode [class*="bg-[#E6F7F3]"],
+.dark-mode [class*="bg-[#E8FAF4]"] {
+  background-color: rgba(0, 214, 176, 0.12) !important;
+}
+
+.dark-mode [class*="bg-blue-50"],
+.dark-mode [class*="bg-blue-100"],
+.dark-mode [class*="bg-sky-50"],
+.dark-mode [class*="bg-sky-100"],
+.dark-mode [class*="bg-indigo-50"],
+.dark-mode [class*="bg-indigo-100"],
+.dark-mode [class*="bg-[#EAF4FF]"],
+.dark-mode [class*="bg-[#EBF3FF]"],
+.dark-mode [class*="bg-[#EEF5FF]"],
+.dark-mode [class*="bg-[#F0F7FF]"],
+.dark-mode [class*="bg-[#E0F2FE]"] {
+  background-color: rgba(38, 132, 255, 0.12) !important;
+}
+
+.dark-mode [class*="bg-purple-50"],
+.dark-mode [class*="bg-purple-100"],
+.dark-mode [class*="bg-violet-50"],
+.dark-mode [class*="bg-violet-100"] {
+  background-color: rgba(137, 87, 255, 0.12) !important;
+}
+
+.dark-mode [class*="bg-rose-50"],
+.dark-mode [class*="bg-rose-100"],
+.dark-mode [class*="bg-red-50"],
+.dark-mode [class*="bg-red-100"],
+.dark-mode [class*="bg-[#FEF2F2]"],
+.dark-mode [class*="bg-[#FFF0F3]"] {
+  background-color: rgba(255, 83, 104, 0.12) !important;
+}
+
+.dark-mode [class*="bg-amber-50"],
+.dark-mode [class*="bg-amber-100"],
+.dark-mode [class*="bg-yellow-50"],
+.dark-mode [class*="bg-orange-50"],
+.dark-mode [class*="bg-[#FFFBEB]"] {
+  background-color: rgba(245, 185, 66, 0.12) !important;
+}
+
+/* Gradients */
+.dark-mode [class*="from-white"] {
+  --tw-gradient-from: var(--card) var(--tw-gradient-from-position);
+  --tw-gradient-to: color-mix(in srgb, var(--card), transparent) var(--tw-gradient-to-position);
+}
+
+.dark-mode [class*="from-emerald-50"],
+.dark-mode [class*="from-teal-50"] {
+  --tw-gradient-from: #0c3435 var(--tw-gradient-from-position);
+  --tw-gradient-to: color-mix(in srgb, #0c3435, transparent) var(--tw-gradient-to-position);
+}
+
+.dark-mode [class*="to-emerald-50"],
+.dark-mode [class*="to-teal-50"] {
+  --tw-gradient-to: #102b35 var(--tw-gradient-to-position);
+}
+
+/* Hover surfaces */
+.dark-mode [class*="hover:bg-slate-50"]:hover,
+.dark-mode [class*="hover:bg-slate-100"]:hover,
+.dark-mode [class*="hover:bg-gray-50"]:hover,
+.dark-mode [class*="hover:bg-gray-100"]:hover,
+.dark-mode [class*="hover:bg-[#F8FAFC]"]:hover,
+.dark-mode [class*="hover:bg-[#F1F5F9]"]:hover {
+  background-color: var(--hover) !important;
+}
+
+/* Text Colors */
+.dark-mode [class*="text-slate-950"],
+.dark-mode [class*="text-slate-900"],
+.dark-mode [class*="text-slate-800"],
+.dark-mode [class*="text-slate-700"],
+.dark-mode [class*="text-gray-950"],
+.dark-mode [class*="text-gray-900"],
+.dark-mode [class*="text-gray-800"],
+.dark-mode [class*="text-gray-700"],
+.dark-mode [class*="text-[#071B49]"],
+.dark-mode [class*="text-[#101B3D]"],
+.dark-mode [class*="text-[#334155]"] {
+  color: var(--foreground) !important;
+}
+
+.dark-mode [class*="text-slate-600"],
+.dark-mode [class*="text-slate-500"],
+.dark-mode [class*="text-gray-600"],
+.dark-mode [class*="text-gray-500"],
+.dark-mode [class*="text-[#64748B]"] {
+  color: var(--muted-foreground) !important;
+}
+
+.dark-mode [class*="text-slate-400"],
+.dark-mode [class*="text-gray-400"],
+.dark-mode [class*="text-[#94A3B8]"] {
+  color: var(--text-muted) !important;
+}
+
+.dark-mode [class*="text-slate-300"],
+.dark-mode [class*="text-gray-300"] {
+  color: var(--text-disabled) !important;
+}
+
+.dark-mode [class*="text-emerald-600"],
+.dark-mode [class*="text-emerald-700"],
+.dark-mode [class*="text-emerald-800"],
+.dark-mode [class*="text-teal-600"],
+.dark-mode [class*="text-[#00A884]"],
+.dark-mode [class*="text-[#008F72]"] {
+  color: var(--primary) !important;
+}
+
+.dark-mode [class*="text-blue-600"],
+.dark-mode [class*="text-blue-700"],
+.dark-mode [class*="text-blue-800"],
+.dark-mode [class*="text-indigo-600"],
+.dark-mode [class*="text-indigo-700"],
+.dark-mode [class*="text-sky-600"],
+.dark-mode [class*="text-[#2563EB]"] {
+  color: var(--info) !important;
+}
+
+.dark-mode [class*="text-red-600"],
+.dark-mode [class*="text-red-700"],
+.dark-mode [class*="text-rose-600"],
+.dark-mode [class*="text-rose-700"],
+.dark-mode [class*="text-[#EF476F]"] {
+  color: var(--danger) !important;
+}
+
+.dark-mode [class*="text-amber-600"],
+.dark-mode [class*="text-amber-700"],
+.dark-mode [class*="text-yellow-600"],
+.dark-mode [class*="text-[#D97706]"] {
+  color: var(--warning) !important;
+}
+
+/* Borders */
+.dark-mode [class*="border-slate-50"],
+.dark-mode [class*="border-slate-100"],
+.dark-mode [class*="border-slate-200"],
+.dark-mode [class*="border-slate-300"],
+.dark-mode [class*="border-gray-100"],
+.dark-mode [class*="border-gray-200"],
+.dark-mode [class*="border-gray-300"],
+.dark-mode [class*="border-[#DCE5EC]"],
+.dark-mode [class*="border-[#BFDBFE]"] {
+  border-color: var(--border) !important;
+}
+
+/* Inputs and Forms */
+.dark-mode input:not([type="checkbox"]):not([type="radio"]),
+.dark-mode select,
+.dark-mode textarea {
+  background-color: var(--input) !important;
+  color: var(--foreground) !important;
+  border-color: var(--border) !important;
+}
+
+.dark-mode input::placeholder,
+.dark-mode textarea::placeholder {
+  color: var(--text-muted) !important;
+  opacity: 1;
+}
+
+.dark-mode option {
+  background-color: var(--popover) !important;
+  color: var(--foreground) !important;
+}
+
+/* Dialogs, Popovers & Modals */
+.dark-mode [role="dialog"],
+.dark-mode [role="menu"] {
+  background-color: var(--card) !important;
+  color: var(--foreground) !important;
+  border-color: var(--border) !important;
+}
+
+/* Map Popups */
+.dark-mode .leaflet-popup-content-wrapper,
+.dark-mode .leaflet-popup-tip,
+.dark-mode .leaflet-control,
+.dark-mode .leaflet-bar a {
+  background-color: var(--popover) !important;
+  color: var(--popover-foreground) !important;
+  border-color: var(--border) !important;
+}
+
+.dark-mode .leaflet-bar a:hover,
+.dark-mode .leaflet-bar a:focus {
+  background-color: var(--muted) !important;
+}
+
+.dark-mode .gm-style .gm-style-iw-c,
+.dark-mode .gm-style .gm-style-iw-d {
+  background-color: var(--popover) !important;
+  color: var(--popover-foreground) !important;
+}
+
+.dark-mode .gm-style .gm-style-iw-tc::after {
+  background-color: var(--popover) !important;
+}
+
+.dark-mode .gm-style button.gm-ui-hover-effect {
+  filter: invert(0.85);
+}
+
+/* Dividers */
+.dark-mode [class*="divide-slate-100"] > :not([hidden]) ~ :not([hidden]),
+.dark-mode [class*="divide-slate-200"] > :not([hidden]) ~ :not([hidden]),
+.dark-mode [class*="divide-[#DCE5EC]"] > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--border) !important;
+}
+
+/* Focus and Selection */
+.dark-mode ::selection {
+  color: var(--foreground);
+  background-color: #075e58;
+}
+
+.dark-mode :focus-visible {
+  outline-color: var(--ring);
+}
+
+.dark-mode {
+  scrollbar-color: #20364a #091522;
+}
+
+.reduce-motion * {
+  scroll-behavior: auto !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
 @media print {
   @page {
     size: auto;
@@ -12,14 +395,11 @@
     background-color: white !important;
   }
 
-  /* Prevent page breaks inside cards */
   .bg-white {
     page-break-inside: avoid;
     break-inside: avoid;
   }
-}
 
-@media print {
   .recharts-responsive-container,
   .recharts-wrapper {
     width: 100% !important;

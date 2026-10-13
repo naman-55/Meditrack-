@@ -3,6 +3,26 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (() => {
+        try {
+          const saved = JSON.parse(localStorage.getItem('meditrack_user_preferences_v2') || '{}');
+          const theme = saved?.appearance?.theme || 'Light';
+          const isDark = theme === 'Dark' || (theme === 'System' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (isDark) {
+            document.documentElement.classList.add('dark', 'dark-mode');
+            document.documentElement.dataset.theme = 'dark';
+            document.documentElement.style.colorScheme = 'dark';
+          } else {
+            document.documentElement.classList.remove('dark', 'dark-mode');
+            document.documentElement.dataset.theme = 'light';
+            document.documentElement.style.colorScheme = 'light';
+          }
+        } catch {
+          // Keep the default light theme when saved preferences are unavailable.
+        }
+      })();
+    </script>
     <title>MediTrack V2.0</title>
     <meta name="description" content="Clinical biomarker tracking, health risk analysis, and live nearby medical specialists map." />
     <meta property="og:title" content="MediTrack V2.0" />

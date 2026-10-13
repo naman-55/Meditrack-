@@ -122,7 +122,10 @@ async function initDb() {
       status TEXT DEFAULT 'ACTIVE',
       notification_email INTEGER DEFAULT 1,
       notification_sms INTEGER DEFAULT 0,
-      notification_push INTEGER DEFAULT 1
+      notification_push INTEGER DEFAULT 1,
+      notification_health_reminders INTEGER DEFAULT 0,
+      notification_lab_report_alerts INTEGER DEFAULT 0,
+      notification_frequency TEXT DEFAULT 'instant'
     )
   `);
   
@@ -131,6 +134,9 @@ async function initDb() {
   try { await db.execute('ALTER TABLE users ADD COLUMN notification_email INTEGER DEFAULT 1'); } catch(e) {}
   try { await db.execute('ALTER TABLE users ADD COLUMN notification_sms INTEGER DEFAULT 0'); } catch(e) {}
   try { await db.execute('ALTER TABLE users ADD COLUMN notification_push INTEGER DEFAULT 1'); } catch(e) {}
+  try { await db.execute('ALTER TABLE users ADD COLUMN notification_health_reminders INTEGER DEFAULT 0'); } catch(e) {}
+  try { await db.execute('ALTER TABLE users ADD COLUMN notification_lab_report_alerts INTEGER DEFAULT 0'); } catch(e) {}
+  try { await db.execute("ALTER TABLE users ADD COLUMN notification_frequency TEXT DEFAULT 'instant'"); } catch(e) {}
   try { await db.execute('ALTER TABLE users ADD COLUMN gender TEXT'); } catch(e) {}
   try { await db.execute('ALTER TABLE users ADD COLUMN blood_group TEXT'); } catch(e) {}
   try { await db.execute('ALTER TABLE users ADD COLUMN height_cm REAL'); } catch(e) {}
@@ -359,6 +365,7 @@ async function initDb() {
       contact_value TEXT,
       status TEXT,
       created_at TEXT,
+      updated_at TEXT,
       FOREIGN KEY(user_id) REFERENCES users(id)
     )
   `);
@@ -372,6 +379,8 @@ async function initDb() {
       message TEXT,
       source TEXT,
       status TEXT,
+      delivery_channel TEXT,
+      event_key TEXT,
       created_at TEXT,
       FOREIGN KEY(user_id) REFERENCES users(id),
       FOREIGN KEY(contact_id) REFERENCES trusted_contacts(id)
@@ -443,6 +452,13 @@ async function initDb() {
 
     try { await db.execute('ALTER TABLE health_alerts ADD COLUMN is_read INTEGER DEFAULT 0'); } catch(e) {}
     try { await db.execute('ALTER TABLE health_alerts ADD COLUMN read_at TEXT'); } catch(e) {}
+    try { await db.execute('ALTER TABLE trusted_contacts ADD COLUMN updated_at TEXT'); } catch(e) {}
+    try { await db.execute('ALTER TABLE health_alerts ADD COLUMN delivery_channel TEXT'); } catch(e) {}
+    try { await db.execute('ALTER TABLE health_alerts ADD COLUMN event_key TEXT'); } catch(e) {}
+    try {
+      await db.execute(`UPDATE health_alerts SET status = 'RECORDED', delivery_channel = 'IN_APP'
+                        WHERE status = 'DELIVERED' AND (delivery_channel IS NULL OR delivery_channel = '')`);
+    } catch(e) {}
 
     // Future Outlook Schema Extensions (Phase 6)
     try { await db.execute('ALTER TABLE future_outlook ADD COLUMN status TEXT'); } catch(e) {}
@@ -481,6 +497,7 @@ async function initDb() {
       'CREATE INDEX IF NOT EXISTS idx_specialty_guidance_user ON specialty_guidance(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_trusted_contacts_user ON trusted_contacts(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_alerts_user ON health_alerts(user_id)',
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_alert_event_user_key ON health_alerts(user_id, event_key)',
       'CREATE INDEX IF NOT EXISTS idx_meds_user ON medications(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_habits_user ON habits(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_chat_messages_user ON chat_messages(user_id)',
@@ -1012,7 +1029,8 @@ const handleGetProfile = async (req: any, res: any) => {
     const result = await db.execute({
       sql: `SELECT id, email, name, role, status, phone, date_of_birth, gender, blood_group,
                    height_cm, weight_kg, emergency_contact_name, emergency_contact_relationship, emergency_contact_phone,
-                   notification_email, notification_sms, notification_push 
+                   notification_email, notification_sms, notification_push,
+                   notification_health_reminders, notification_lab_report_alerts, notification_frequency
             FROM users WHERE id = ?`,
       args: [req.user.id]
     });
@@ -1045,6 +1063,24 @@ const handleUpdateProfile = async (req: any, res: any) => {
   const notifEmail = body.notification_email;
   const notifSms = body.notification_sms;
   const notifPush = body.notification_push;
+  const notifHealthReminders = body.notification_health_reminders;
+  const notifLabReportAlerts = body.notification_lab_report_alerts;
+  const notifFrequency = body.notification_frequency;
+
+  for (const [label, value] of [
+    ['Email notifications', notifEmail],
+    ['SMS notifications', notifSms],
+    ['Push notifications', notifPush],
+    ['Health reminders', notifHealthReminders],
+    ['Lab report alerts', notifLabReportAlerts]
+  ] as const) {
+    if (value !== undefined && ![0, 1, true, false].includes(value)) {
+      return res.status(400).json({ error: `${label} must be enabled or disabled` });
+    }
+  }
+  if (notifFrequency !== undefined && !['instant', 'daily', 'weekly'].includes(notifFrequency)) {
+    return res.status(400).json({ error: 'Notification cadence must be instant, daily, or weekly' });
+  }
 
   // Validation
   if (name !== undefined) {
@@ -1129,6 +1165,9 @@ const handleUpdateProfile = async (req: any, res: any) => {
     const finalEmailNotif = notifEmail !== undefined ? (notifEmail ? 1 : 0) : (current.notification_email ?? 1);
     const finalSmsNotif = notifSms !== undefined ? (notifSms ? 1 : 0) : (current.notification_sms ?? 0);
     const finalPushNotif = notifPush !== undefined ? (notifPush ? 1 : 0) : (current.notification_push ?? 1);
+    const finalHealthReminders = notifHealthReminders !== undefined ? (notifHealthReminders ? 1 : 0) : (current.notification_health_reminders ?? 0);
+    const finalLabReportAlerts = notifLabReportAlerts !== undefined ? (notifLabReportAlerts ? 1 : 0) : (current.notification_lab_report_alerts ?? 0);
+    const finalNotificationFrequency = notifFrequency !== undefined ? notifFrequency : (current.notification_frequency || 'instant');
 
     await db.execute({
       sql: `UPDATE users SET 
@@ -1144,7 +1183,10 @@ const handleUpdateProfile = async (req: any, res: any) => {
               emergency_contact_phone = ?,
               notification_email = ?, 
               notification_sms = ?, 
-              notification_push = ?
+              notification_push = ?,
+              notification_health_reminders = ?,
+              notification_lab_report_alerts = ?,
+              notification_frequency = ?
             WHERE id = ?`,
       args: [
         finalName,
@@ -1160,12 +1202,16 @@ const handleUpdateProfile = async (req: any, res: any) => {
         finalEmailNotif,
         finalSmsNotif,
         finalPushNotif,
+        finalHealthReminders,
+        finalLabReportAlerts,
+        finalNotificationFrequency,
         req.user.id
       ]
     });
 
     // If emergency contact provided, also update/insert in trusted_contacts for consistency (Phase 5)
-    if (finalEmName && finalEmPhone) {
+    const emergencyContactWasUpdated = emName !== undefined || emRel !== undefined || emPhone !== undefined;
+    if (emergencyContactWasUpdated && finalEmName && finalEmPhone) {
       try {
         const existingTc = await db.execute({
           sql: `SELECT id FROM trusted_contacts WHERE user_id = ? AND relationship = ? LIMIT 1`,
@@ -1173,14 +1219,14 @@ const handleUpdateProfile = async (req: any, res: any) => {
         });
         if (existingTc.rows.length > 0) {
           await db.execute({
-            sql: `UPDATE trusted_contacts SET name = ?, contact_value = ?, status = 'ACTIVE' WHERE id = ?`,
-            args: [finalEmName, finalEmPhone, existingTc.rows[0].id]
+            sql: `UPDATE trusted_contacts SET name = ?, contact_value = ?, status = 'ACTIVE', updated_at = ? WHERE id = ?`,
+            args: [finalEmName, finalEmPhone, new Date().toISOString(), existingTc.rows[0].id]
           });
         } else {
           await db.execute({
-            sql: `INSERT INTO trusted_contacts (user_id, name, relationship, contact_method, contact_value, status, created_at)
-                  VALUES (?, ?, ?, 'PHONE', ?, 'ACTIVE', ?)`,
-            args: [req.user.id, finalEmName, finalEmRel || 'Other', finalEmPhone, new Date().toISOString()]
+            sql: `INSERT INTO trusted_contacts (user_id, name, relationship, contact_method, contact_value, status, created_at, updated_at)
+                  VALUES (?, ?, ?, 'PHONE', ?, 'ACTIVE', ?, ?)`,
+            args: [req.user.id, finalEmName, finalEmRel || 'Other', finalEmPhone, new Date().toISOString(), new Date().toISOString()]
           });
         }
       } catch (tcErr) {
@@ -1191,7 +1237,8 @@ const handleUpdateProfile = async (req: any, res: any) => {
     const updatedRes = await db.execute({
       sql: `SELECT id, email, name, role, status, phone, date_of_birth, gender, blood_group,
                    height_cm, weight_kg, emergency_contact_name, emergency_contact_relationship, emergency_contact_phone,
-                   notification_email, notification_sms, notification_push 
+                   notification_email, notification_sms, notification_push,
+                   notification_health_reminders, notification_lab_report_alerts, notification_frequency
             FROM users WHERE id = ?`,
       args: [req.user.id]
     });
@@ -1676,6 +1723,24 @@ app.post('/api/reports/upload', authenticateToken, uploadRateLimiter, upload.sin
       args: [report.id]
     });
     report.processing_status = 'COMPLETED';
+
+    try {
+      await db.execute({
+        sql: `INSERT OR IGNORE INTO health_alerts
+                (user_id, contact_id, type, message, source, status, delivery_channel, event_key, is_read, created_at)
+              VALUES (?, NULL, ?, ?, ?, 'RECORDED', 'IN_APP', ?, 0, ?)`,
+        args: [
+          req.user.id,
+          'REPORT_PROCESSED',
+          'A report finished processing. Sign in to MediTrack to review the results.',
+          'Medical Report Processing',
+          `report-processed:${report.id}`,
+          new Date().toISOString()
+        ]
+      });
+    } catch (alertError) {
+      console.warn('Could not record the report processing notification');
+    }
 
     // Invalidate analysis cache and refresh specialty guidance for newly processed report
     try {
@@ -2518,16 +2583,10 @@ app.get('/api/specialty/snapshot', authenticateToken, async (req: any, res) => {
 
 app.get('/api/specialty', authenticateToken, async (req: any, res) => {
   try {
-    let result = await db.execute({
+    const result = await db.execute({
       sql: 'SELECT * FROM specialty_guidance WHERE user_id = ? ORDER BY created_at DESC',
       args: [req.user.id]
     });
-
-    if (result.rows.length === 0) {
-      const generated = await generateSpecialtyGuidance(req.user.id);
-      return res.json(generated);
-    }
-
     res.json(result.rows);
   } catch (error: any) {
     console.error('Error fetching specialty guidance:', error);
@@ -3250,52 +3309,150 @@ app.put('/api/admin/facilities/:id', authenticateToken, requireRole('ADMIN'), as
 
 // --- TRUSTED CONTACTS & ALERTS ROUTES (PHASE 12 & 13) ---
 
+function buildTrustedContactValues(body: any, current?: any) {
+  const nameRaw = body.name !== undefined ? body.name : current?.name;
+  const relationshipRaw = body.relationship !== undefined ? body.relationship : current?.relationship;
+  const methodRaw = body.contact_method !== undefined ? body.contact_method : current?.contact_method;
+  const valueRaw = body.contact_value !== undefined ? body.contact_value : current?.contact_value;
+  const statusRaw = body.status !== undefined ? body.status : (current?.status || 'ACTIVE');
+  const errors: Record<string, string> = {};
+
+  const name = typeof nameRaw === 'string' ? nameRaw.trim() : '';
+  const relationship = typeof relationshipRaw === 'string' ? relationshipRaw.trim() : '';
+  let contactMethod = typeof methodRaw === 'string' ? methodRaw.trim().toUpperCase() : '';
+  const status = typeof statusRaw === 'string' ? statusRaw.trim().toUpperCase() : '';
+  const contactInput = typeof valueRaw === 'string' ? valueRaw.trim() : '';
+
+  if (contactMethod === 'PHONE') contactMethod = 'SMS';
+  if (!name) errors.name = 'Enter the contact’s full name.';
+  else if (name.length > 100) errors.name = 'Name must be 100 characters or fewer.';
+  if (!relationship) errors.relationship = 'Enter the contact’s relationship.';
+  else if (relationship.length > 80) errors.relationship = 'Relationship must be 80 characters or fewer.';
+  if (!['EMAIL', 'SMS'].includes(contactMethod)) errors.contact_method = 'Choose email or SMS/phone.';
+  if (!['ACTIVE', 'DISABLED', 'INACTIVE'].includes(status)) errors.status = 'Choose a valid contact status.';
+
+  let contactValue = contactInput;
+  if (contactMethod === 'EMAIL') {
+    contactValue = contactInput.toLowerCase();
+    if (!contactValue) errors.contact_value = 'Enter an email address.';
+    else if (contactValue.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactValue)) errors.contact_value = 'Enter a valid email address.';
+  } else if (contactMethod === 'SMS') {
+    const digits = contactInput.replace(/\D/g, '');
+    if (!contactInput) errors.contact_value = 'Enter a phone number.';
+    else if (!/^\+?[\d\s().-]+$/.test(contactInput) || digits.length < 7 || digits.length > 15) errors.contact_value = 'Enter a valid phone number with 7 to 15 digits.';
+    else contactValue = contactInput.startsWith('+') ? `+${digits}` : digits;
+  }
+
+  return {
+    errors,
+    values: { name, relationship, contact_method: contactMethod, contact_value: contactValue, status: status === 'INACTIVE' ? 'DISABLED' : status }
+  };
+}
+
+function trustedContactDuplicateKey(method: string, value: string) {
+  return method === 'EMAIL' ? value.trim().toLowerCase() : value.replace(/\D/g, '');
+}
+
+function trustedContactMethod(method: unknown) {
+  const normalized = String(method || '').toUpperCase();
+  return normalized === 'PHONE' ? 'SMS' : normalized;
+}
+
 app.get('/api/contacts', authenticateToken, async (req: any, res: any) => {
-  const result = await db.execute({
-    sql: 'SELECT * FROM trusted_contacts WHERE user_id = ? ORDER BY created_at DESC',
-    args: [req.user.id]
-  });
-  res.json(result.rows);
+  try {
+    const result = await db.execute({
+      sql: 'SELECT * FROM trusted_contacts WHERE user_id = ? ORDER BY created_at DESC',
+      args: [req.user.id]
+    });
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Trusted contacts retrieval failed');
+    res.status(500).json({ error: 'Unable to retrieve trusted contacts' });
+  }
 });
 
 app.post('/api/contacts', authenticateToken, async (req: any, res: any) => {
-  const { name, relationship, contact_method, contact_value, status } = req.body;
-  const now = new Date().toISOString();
-  const result = await db.execute({
-    sql: `INSERT INTO trusted_contacts (user_id, name, relationship, contact_method, contact_value, status, created_at) 
-          VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    args: [req.user.id, name, relationship, contact_method, contact_value, status || 'ACTIVE', now]
-  });
-  res.json(result.rows[0]);
+  try {
+    const { errors, values } = buildTrustedContactValues(req.body || {});
+    if (Object.keys(errors).length) return res.status(400).json({ error: 'Check the contact details and try again.', fields: errors });
+    const existing = await db.execute({ sql: 'SELECT id, contact_method, contact_value FROM trusted_contacts WHERE user_id = ?', args: [req.user.id] });
+    const duplicate = existing.rows.some((contact: any) =>
+      trustedContactMethod(contact.contact_method) === values.contact_method &&
+      trustedContactDuplicateKey(values.contact_method, String(contact.contact_value || '')) === trustedContactDuplicateKey(values.contact_method, values.contact_value)
+    );
+    if (duplicate) return res.status(409).json({ error: 'A contact with this email address or phone number already exists.' });
+    const now = new Date().toISOString();
+    const result = await db.execute({
+      sql: `INSERT INTO trusted_contacts (user_id, name, relationship, contact_method, contact_value, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      args: [req.user.id, values.name, values.relationship, values.contact_method, values.contact_value, values.status, now, now]
+    });
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Trusted contact creation failed');
+    res.status(500).json({ error: 'Unable to save the trusted contact' });
+  }
 });
 
 app.put('/api/contacts/:id', authenticateToken, async (req: any, res: any) => {
-  const { name, relationship, contact_method, contact_value, status } = req.body;
-  const result = await db.execute({
-    sql: `UPDATE trusted_contacts SET name=?, relationship=?, contact_method=?, contact_value=?, status=? WHERE id=? AND user_id=? RETURNING *`,
-    args: [name, relationship, contact_method, contact_value, status, req.params.id, req.user.id]
-  });
-  if (result.rows.length === 0) return res.status(404).json({ error: 'Contact not found' });
-  res.json(result.rows[0]);
+  try {
+    const contactId = Number(req.params.id);
+    if (!Number.isSafeInteger(contactId) || contactId <= 0) return res.status(400).json({ error: 'Invalid contact ID' });
+    const currentResult = await db.execute({ sql: 'SELECT * FROM trusted_contacts WHERE id = ? AND user_id = ?', args: [contactId, req.user.id] });
+    const current = currentResult.rows[0];
+    if (!current) return res.status(404).json({ error: 'Contact not found' });
+    const { errors, values } = buildTrustedContactValues(req.body || {}, current);
+    if (Object.keys(errors).length) return res.status(400).json({ error: 'Check the contact details and try again.', fields: errors });
+    const existing = await db.execute({ sql: 'SELECT id, contact_method, contact_value FROM trusted_contacts WHERE user_id = ?', args: [req.user.id] });
+    const duplicate = existing.rows.some((contact: any) =>
+      Number(contact.id) !== contactId &&
+      trustedContactMethod(contact.contact_method) === values.contact_method &&
+      trustedContactDuplicateKey(values.contact_method, String(contact.contact_value || '')) === trustedContactDuplicateKey(values.contact_method, values.contact_value)
+    );
+    if (duplicate) return res.status(409).json({ error: 'A contact with this email address or phone number already exists.' });
+    const result = await db.execute({
+      sql: `UPDATE trusted_contacts SET name = ?, relationship = ?, contact_method = ?, contact_value = ?, status = ?, updated_at = ?
+            WHERE id = ? AND user_id = ? RETURNING *`,
+      args: [values.name, values.relationship, values.contact_method, values.contact_value, values.status, new Date().toISOString(), contactId, req.user.id]
+    });
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Contact not found' });
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Trusted contact update failed');
+    res.status(500).json({ error: 'Unable to update the trusted contact' });
+  }
 });
 
 app.delete('/api/contacts/:id', authenticateToken, async (req: any, res: any) => {
-  const result = await db.execute({
-    sql: 'DELETE FROM trusted_contacts WHERE id=? AND user_id=?',
-    args: [req.params.id, req.user.id]
-  });
-  res.json({ success: true });
+  try {
+    const contactId = Number(req.params.id);
+    if (!Number.isSafeInteger(contactId) || contactId <= 0) return res.status(400).json({ error: 'Invalid contact ID' });
+    const result = await db.execute({
+      sql: `UPDATE trusted_contacts SET status = 'DISABLED', updated_at = ? WHERE id = ? AND user_id = ? RETURNING *`,
+      args: [new Date().toISOString(), contactId, req.user.id]
+    });
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Contact not found' });
+    res.json({ success: true, contact: result.rows[0] });
+  } catch (error) {
+    console.error('Trusted contact deactivation failed');
+    res.status(500).json({ error: 'Unable to deactivate the trusted contact' });
+  }
 });
 
 app.get('/api/alerts', authenticateToken, async (req: any, res: any) => {
-  const result = await db.execute({
-    sql: `SELECT a.*, c.name as contact_name 
-          FROM health_alerts a 
-          LEFT JOIN trusted_contacts c ON a.contact_id = c.id 
-          WHERE a.user_id = ? ORDER BY a.created_at DESC`,
-    args: [req.user.id]
-  });
-  res.json(result.rows);
+  try {
+    const result = await db.execute({
+      sql: `SELECT a.*, c.name as contact_name
+            FROM health_alerts a
+            LEFT JOIN trusted_contacts c ON a.contact_id = c.id
+            WHERE a.user_id = ? ORDER BY a.created_at DESC LIMIT 100`,
+      args: [req.user.id]
+    });
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Alert history retrieval failed');
+    res.status(500).json({ error: 'Unable to retrieve alert history' });
+  }
 });
 
 // Mark single alert as read (Phase 15)
@@ -3317,18 +3474,6 @@ app.put('/api/alerts/read-all', authenticateToken, async (req: any, res: any) =>
     args: [now, req.user.id]
   });
   res.json({ success: true });
-});
-
-// System route to generate health alert (Phase 13)
-app.post('/api/alerts', authenticateToken, async (req: any, res: any) => {
-  const { type, message, source, contact_id } = req.body;
-  const now = new Date().toISOString();
-  const result = await db.execute({
-    sql: `INSERT INTO health_alerts (user_id, contact_id, type, message, source, status, is_read, created_at) 
-          VALUES (?, ?, ?, ?, ?, ?, 0, ?) RETURNING *`,
-    args: [req.user.id, contact_id || null, type, message, source || 'Clinical System', 'DELIVERED', now]
-  });
-  res.json(result.rows[0]);
 });
 
 // --- GLOBAL SEARCH ROUTE (PHASE 14) ---

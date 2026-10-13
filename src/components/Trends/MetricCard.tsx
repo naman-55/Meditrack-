@@ -263,14 +263,14 @@ export default function MetricCard({ data, className = '', onInspect }: MetricCa
                   <CartesianGrid 
                     strokeDasharray="3 3" 
                     vertical={false} 
-                    stroke="#F1F5F9" 
+                    stroke="var(--chart-grid)" 
                   />
 
                   <XAxis 
                     dataKey="date" 
                     axisLine={false} 
                     tickLine={false} 
-                    tick={{ fill: '#94A3B8', fontSize: 11, fontWeight: 500 }} 
+                    tick={{ fill: 'var(--chart-label)', fontSize: 11, fontWeight: 500 }} 
                     dy={6}
                   />
 
@@ -279,7 +279,7 @@ export default function MetricCard({ data, className = '', onInspect }: MetricCa
                     ticks={yAxisConfig.ticks}
                     axisLine={false} 
                     tickLine={false} 
-                    tick={{ fill: '#94A3B8', fontSize: 10, fontWeight: 500 }} 
+                    tick={{ fill: 'var(--chart-label)', fontSize: 10, fontWeight: 500 }} 
                     dx={-2}
                   />
 
@@ -296,13 +296,13 @@ export default function MetricCard({ data, className = '', onInspect }: MetricCa
                     dot={{
                       r: 4,
                       fill: theme.chartColor,
-                      stroke: '#FFFFFF',
+                      stroke: 'var(--chart-dot-outline)',
                       strokeWidth: 2
                     }}
                     activeDot={{
                       r: 6,
                       fill: theme.chartColor,
-                      stroke: '#FFFFFF',
+                      stroke: 'var(--chart-dot-outline)',
                       strokeWidth: 2
                     }}
                   />

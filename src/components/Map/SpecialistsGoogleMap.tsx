@@ -8,6 +8,7 @@ import {
 } from '@vis.gl/react-google-maps';
 import { SpecialistProvider } from '../../api/specialists';
 import { ErrorBoundary } from '../ErrorBoundary';
+import { useSettings } from '../../context/SettingsContext';
 import { 
   Building2, 
   Stethoscope, 
@@ -179,6 +180,12 @@ export default function SpecialistsGoogleMap({
   isLoading
 }: SpecialistsGoogleMapProps) {
   const [mapLoadError, setMapLoadError] = useState(false);
+  const { preferences } = useSettings();
+  const mapColorScheme = preferences.appearance.theme === 'Dark'
+    ? 'DARK'
+    : preferences.appearance.theme === 'Light'
+      ? 'LIGHT'
+      : 'FOLLOW_SYSTEM';
 
   const activeKey = apiKey || 
     (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY || 
@@ -279,6 +286,7 @@ export default function SpecialistsGoogleMap({
         >
           <Map
             mapId="DEMO_MAP_ID"
+            colorScheme={mapColorScheme}
             defaultCenter={{ 
               lat: isSearchCenterValid ? searchCenter.lat : 23.2599, 
               lng: isSearchCenterValid ? searchCenter.lng : 77.4126 

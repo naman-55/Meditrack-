@@ -9,6 +9,7 @@ export interface TrustedContact {
   contact_value: string;
   status: string;
   created_at: string;
+  updated_at?: string | null;
 }
 
 export interface HealthAlert {
@@ -20,6 +21,9 @@ export interface HealthAlert {
   message: string;
   source: string;
   status: string;
+  delivery_channel?: string | null;
+  is_read?: number;
+  read_at?: string | null;
   created_at: string;
 }
 
@@ -33,7 +37,7 @@ export const familyService = {
   updateContact: async (id: number, contact: Partial<TrustedContact>): Promise<TrustedContact> => {
     return apiClient.put(`/api/contacts/${id}`, contact);
   },
-  deleteContact: async (id: number): Promise<void> => {
+  deleteContact: async (id: number): Promise<{ success: boolean; contact: TrustedContact }> => {
     return apiClient.delete(`/api/contacts/${id}`);
   },
   getAlerts: async (): Promise<HealthAlert[]> => {

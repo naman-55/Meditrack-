@@ -28,7 +28,7 @@ import { cn } from '../utils/cn';
 type SubView = 'main' | 'change-password' | 'sessions' | 'theme-picker' | 'height-picker' | 'weight-picker' | 'temp-picker' | 'time-picker';
 
 export default function SettingsDrawer() {
-  const { isOpen, closeSettings, preferences, setAppearance, setNotification, setUnit, setPrivacy } = useSettings();
+  const { isOpen, closeSettings, preferences, setAppearance, setNotification, setUnit, setPrivacy, notificationPrefsLoaded, notificationSaving, notificationError } = useSettings();
   const { user, logout } = useAuth();
 
   const [activeSubView, setActiveSubView] = useState<SubView>('main');
@@ -374,55 +374,81 @@ export default function SettingsDrawer() {
                   <span>Notifications</span>
                 </h3>
 
+                {notificationSaving && <p role="status" className="px-3 pb-2 text-[11px] text-[#64748B]">Saving…</p>}
+                {notificationError && <p role="alert" className="mx-3 mb-2 rounded-lg bg-rose-50 p-2 text-[11px] text-rose-700">{notificationError}</p>}
+
+                {!notificationPrefsLoaded ? (
+                  <div role="status" className="space-y-2 px-3 py-2" aria-label="Loading saved notification settings">
+                    {[1, 2, 3, 4, 5].map((row) => <div key={row} className="h-10 rounded-lg bg-slate-100 animate-pulse" />)}
+                  </div>
+                ) : (
                 <div className="space-y-2.5">
                   <div className="flex items-center justify-between py-2 px-3 rounded-xl">
                     <div>
                       <span className="text-xs font-semibold text-[#071B49] block">Email notifications</span>
-                      <span className="text-[11px] text-[#64748B] block">Health digests and critical updates</span>
+                      <span className="text-[11px] text-[#64748B] block">Preference only; email delivery is not configured</span>
                     </div>
                     <NeumorphicToggle
                       checked={preferences.notifications.emailNotifications}
-                      onChange={(checked) => setNotification('emailNotifications', checked)}
+                      onChange={(checked) => void setNotification('emailNotifications', checked)}
                       label="Email notifications"
+                      disabled={!notificationPrefsLoaded || notificationSaving !== null}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between py-2 px-3 rounded-xl">
+                    <div>
+                      <span className="text-xs font-semibold text-[#071B49] block">SMS alerts</span>
+                      <span className="text-[11px] text-[#64748B] block">Preference only; SMS delivery is not configured</span>
+                    </div>
+                    <NeumorphicToggle
+                      checked={preferences.notifications.smsAlerts}
+                      onChange={(checked) => void setNotification('smsAlerts', checked)}
+                      label="SMS alerts"
+                      disabled={!notificationPrefsLoaded || notificationSaving !== null}
                     />
                   </div>
 
                   <div className="flex items-center justify-between py-2 px-3 rounded-xl">
                     <div>
                       <span className="text-xs font-semibold text-[#071B49] block">Push notifications</span>
-                      <span className="text-[11px] text-[#64748B] block">Real-time alerts on active device</span>
+                      <span className="text-[11px] text-[#64748B] block">Preference only; browser push is not configured</span>
                     </div>
                     <NeumorphicToggle
                       checked={preferences.notifications.pushNotifications}
-                      onChange={(checked) => setNotification('pushNotifications', checked)}
+                      onChange={(checked) => void setNotification('pushNotifications', checked)}
                       label="Push notifications"
+                      disabled={!notificationPrefsLoaded || notificationSaving !== null}
                     />
                   </div>
 
                   <div className="flex items-center justify-between py-2 px-3 rounded-xl">
                     <div>
                       <span className="text-xs font-semibold text-[#071B49] block">Health reminders</span>
-                      <span className="text-[11px] text-[#64748B] block">Medication schedules & vitals check-ins</span>
+                      <span className="text-[11px] text-[#64748B] block">Preference only; reminder scheduling is not configured</span>
                     </div>
                     <NeumorphicToggle
                       checked={preferences.notifications.healthReminders}
-                      onChange={(checked) => setNotification('healthReminders', checked)}
+                      onChange={(checked) => void setNotification('healthReminders', checked)}
                       label="Health reminders"
+                      disabled={!notificationPrefsLoaded || notificationSaving !== null}
                     />
                   </div>
 
                   <div className="flex items-center justify-between py-2 px-3 rounded-xl">
                     <div>
                       <span className="text-xs font-semibold text-[#071B49] block">Lab report alerts</span>
-                      <span className="text-[11px] text-[#64748B] block">Instant notifications when tests are parsed</span>
+                      <span className="text-[11px] text-[#64748B] block">Preference only; clinical alert rules are not configured</span>
                     </div>
                     <NeumorphicToggle
                       checked={preferences.notifications.labReportAlerts}
-                      onChange={(checked) => setNotification('labReportAlerts', checked)}
+                      onChange={(checked) => void setNotification('labReportAlerts', checked)}
                       label="Lab report alerts"
+                      disabled={!notificationPrefsLoaded || notificationSaving !== null}
                     />
                   </div>
                 </div>
+                )}
               </section>
 
               {/* SECTION 3: Units & Display */}
@@ -975,9 +1001,10 @@ interface NeumorphicToggleProps {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label: string;
+  disabled?: boolean;
 }
 
-function NeumorphicToggle({ checked, onChange, label }: NeumorphicToggleProps) {
+function NeumorphicToggle({ checked, onChange, label, disabled = false }: NeumorphicToggleProps) {
   return (
     <div className="flex items-center gap-2">
       <span className={cn(
@@ -991,9 +1018,10 @@ function NeumorphicToggle({ checked, onChange, label }: NeumorphicToggleProps) {
         role="switch"
         aria-checked={checked}
         aria-label={label}
+        disabled={disabled}
         onClick={() => onChange(!checked)}
         className={cn(
-          "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#00A884]/30",
+          "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#00A884]/30 disabled:cursor-wait disabled:opacity-60",
           checked
             ? "bg-[#00A884] border border-[#009272] shadow-[inset_1px_1px_3px_rgba(0,0,0,0.15)]"
             : "bg-[#F1F5F9] border border-[#DCE5EC] shadow-[inset_2px_2px_4px_rgba(7,27,73,0.06),inset_-1px_-1px_2px_rgba(255,255,255,0.9)]"
@@ -1052,6 +1080,7 @@ function OptionPickerView<T extends string>({
                 key={opt}
                 type="button"
                 onClick={() => onSelect(opt)}
+                aria-pressed={isSelected}
                 className={cn(
                   "w-full flex items-center justify-between py-2.5 px-3.5 rounded-xl text-left text-xs font-semibold transition-all border",
                   isSelected

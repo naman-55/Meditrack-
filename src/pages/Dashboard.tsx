@@ -313,29 +313,29 @@ export default function Dashboard() {
     <div id="dashboard-content" className="space-y-6">
       <div className="flex justify-between items-center mb-6">
         <div className="md:hidden print:hidden">
-          <h2 className="text-xl font-bold text-gray-900 leading-tight">Welcome back, <span className="text-emerald-700">{user?.name?.split(' ')[0]}</span> 👋</h2>
-          <p className="text-sm text-gray-500 mt-1">Here's your health overview</p>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-[#F1F5FB] leading-tight">Welcome back, <span className="text-emerald-700 dark:text-[#00D6B0]">{user?.name?.split(' ')[0] || 'Patient'}</span> 👋</h2>
+          <p className="text-sm text-gray-500 dark:text-[#7186A3] mt-1">Here's your health overview</p>
         </div>
         <div className="hidden md:block print:block">
-           <h1 className="text-2xl font-bold text-slate-900 print:block">Health Overview Report</h1>
+           <h1 className="text-2xl font-bold text-slate-900 dark:text-[#F1F5FB] print:block">Health Overview Report</h1>
         </div>
         <button 
           data-html2canvas-ignore="true"
           onClick={handleExportPDF}
-          className="print:hidden flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg shadow-sm hover:bg-slate-50 transition-colors ml-auto"
+          className="print:hidden flex items-center gap-2 px-4 py-2 bg-white dark:bg-[#0D1B2A] border border-slate-200 dark:border-[#20364A] text-slate-700 dark:text-[#F1F5FB] rounded-xl shadow-sm hover:bg-slate-50 dark:hover:bg-[#14283B] transition-colors ml-auto cursor-pointer"
         >
-          <Printer className="w-4 h-4" />
+          <Printer className="w-4 h-4 text-slate-500 dark:text-[#A6B8CF]" />
           <span className="font-medium text-sm hidden sm:inline">Export PDF</span>
         </button>
       </div>
       
       {error && !dashboardDisplayData ? (
-        <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl flex items-center justify-between">
+        <div className="bg-red-50 dark:bg-[#FF5368]/15 border border-red-200 dark:border-[#FF5368]/30 text-red-700 dark:text-[#FF5368] p-4 rounded-xl flex items-center justify-between">
           <div className="flex items-center gap-3">
             <AlertCircle className="w-5 h-5" />
             <p className="text-sm font-medium">{error}</p>
           </div>
-          <button onClick={loadData} className="px-3 py-1.5 bg-red-100 hover:bg-red-200 rounded text-xs font-bold transition-colors">
+          <button onClick={loadData} className="px-3 py-1.5 bg-red-100 dark:bg-[#FF5368]/20 hover:bg-red-200 dark:hover:bg-[#FF5368]/30 rounded text-xs font-bold transition-colors">
             Retry
           </button>
         </div>
@@ -357,7 +357,7 @@ export default function Dashboard() {
                 <select
                   value={selectedParam || ''}
                   onChange={(e) => setSelectedParam(e.target.value)}
-                  className="block w-40 rounded-md border-slate-300 py-1 pl-3 pr-8 text-sm focus:border-emerald-500 focus:outline-none focus:ring-emerald-500"
+                  className="block w-40 rounded-xl border border-slate-300 dark:border-[#20364A] bg-white dark:bg-[#101F30] text-slate-800 dark:text-[#F1F5FB] py-1.5 pl-3 pr-8 text-xs sm:text-sm focus:border-emerald-500 dark:focus:border-[#00D6B0] focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:focus:ring-[#00D6B0] shadow-sm cursor-pointer"
                 >
                   {Object.keys(localAnalytics.trends)
                     .filter(p => !['blood_pressure_systolic', 'blood_pressure_diastolic', 'heart_rate', 'spo2'].includes(p))
@@ -382,26 +382,38 @@ export default function Dashboard() {
         </ErrorBoundary>
 
         <ErrorBoundary title="Vitals Trend">
-          <div className="relative h-full flex flex-col bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden min-h-[300px]">
+          <div className="relative h-full flex flex-col bg-white dark:bg-[#0D1B2A] rounded-2xl border border-slate-200 dark:border-[#20364A] shadow-sm overflow-hidden min-h-[300px]">
             {/* Custom Modern Header for Switcher */}
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between z-10 shrink-0">
-              <h4 className="font-bold text-slate-700 capitalize">Vitals Track</h4>
-              <div className="flex bg-slate-100 p-1 rounded-lg">
+            <div className="p-4 border-b border-slate-100 dark:border-[#20364A] flex items-center justify-between z-10 shrink-0">
+              <h4 className="font-bold text-slate-700 dark:text-[#F1F5FB] capitalize">Vitals Track</h4>
+              <div className="flex bg-slate-100 dark:bg-[#101F30] p-1 rounded-xl border border-transparent dark:border-[#20364A]">
                 <button
                   onClick={() => setActiveVitalTab('bp')}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all duration-200 ${activeVitalTab === 'bp' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 cursor-pointer ${
+                    activeVitalTab === 'bp' 
+                      ? 'bg-white text-slate-800 shadow-sm dark:bg-[#00D6B0] dark:text-[#07111D] dark:font-bold' 
+                      : 'text-slate-500 dark:text-[#A6B8CF] hover:text-slate-700 dark:hover:text-[#F1F5FB]'
+                  }`}
                 >
                   BP
                 </button>
                 <button
                   onClick={() => setActiveVitalTab('hr')}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all duration-200 ${activeVitalTab === 'hr' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 cursor-pointer ${
+                    activeVitalTab === 'hr' 
+                      ? 'bg-white text-slate-800 shadow-sm dark:bg-[#00D6B0] dark:text-[#07111D] dark:font-bold' 
+                      : 'text-slate-500 dark:text-[#A6B8CF] hover:text-slate-700 dark:hover:text-[#F1F5FB]'
+                  }`}
                 >
                   Heart Rate
                 </button>
                 <button
                   onClick={() => setActiveVitalTab('other')}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all duration-200 ${activeVitalTab === 'other' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 cursor-pointer ${
+                    activeVitalTab === 'other' 
+                      ? 'bg-white text-slate-800 shadow-sm dark:bg-[#00D6B0] dark:text-[#07111D] dark:font-bold' 
+                      : 'text-slate-500 dark:text-[#A6B8CF] hover:text-slate-700 dark:hover:text-[#F1F5FB]'
+                  }`}
                 >
                   {dashboardDisplayData?.spo2ChartData ? "SpO2" : dashboardDisplayData?.bmiChartData ? "BMI" : "Other"}
                 </button>
@@ -478,10 +490,10 @@ export default function Dashboard() {
         </div>
       </div>
       
-      <div className="mt-8 bg-slate-50 border border-slate-200 rounded-xl p-6 flex flex-col items-center justify-center text-center shadow-sm">
-        <ShieldCheck className="w-8 h-8 text-slate-300 mb-3" />
-        <h5 className="font-bold text-slate-700 text-sm mb-1">Disclaimer</h5>
-        <p className="text-xs text-slate-500 max-w-md leading-relaxed">
+      <div className="mt-8 bg-slate-50 dark:bg-[#0D1B2A] border border-slate-200 dark:border-[#20364A] rounded-2xl p-6 flex flex-col items-center justify-center text-center shadow-sm">
+        <ShieldCheck className="w-8 h-8 text-slate-300 dark:text-[#7186A3] mb-3" />
+        <h5 className="font-bold text-slate-700 dark:text-[#F1F5FB] text-sm mb-1">Disclaimer</h5>
+        <p className="text-xs text-slate-500 dark:text-[#7186A3] max-w-md leading-relaxed">
           This is an AI-assisted health analysis tool for informational purposes only. It does not replace professional medical advice, diagnosis, or treatment.
         </p>
       </div>
