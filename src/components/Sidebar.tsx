@@ -73,9 +73,9 @@ export default function Sidebar({ onClose }: SidebarProps) {
             to={item.path}
             onClick={onClose}
             className={({ isActive }) => cn(
-              "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
+              "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all",
               isActive 
-                ? "bg-emerald-50 text-emerald-700" 
+                ? "bg-[#E6F7F3] text-[#00A884] shadow-2xs font-bold" 
                 : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
             )}
           >
@@ -96,9 +96,9 @@ export default function Sidebar({ onClose }: SidebarProps) {
                 to={item.path}
                 onClick={onClose}
                 className={({ isActive }) => cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
+                  "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all",
                   isActive 
-                    ? "bg-emerald-50 text-emerald-700" 
+                    ? "bg-[#E6F7F3] text-[#00A884] shadow-2xs font-bold" 
                     : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                 )}
               >
@@ -110,14 +110,17 @@ export default function Sidebar({ onClose }: SidebarProps) {
         )}
       </nav>
 
-      {/* Support Card / User Profile */}
+      {/* Better Health Brighter Tomorrow Card */}
       <div className="p-4 mt-auto">
-        <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 mb-4">
-          <h4 className="text-xs font-bold text-slate-800 mb-1">Need Help?</h4>
-          <p className="text-[10px] text-slate-500 mb-3 leading-relaxed">Our support team is here to assist you.</p>
-          <button className="w-full text-[11px] font-bold text-emerald-700 bg-emerald-100/50 hover:bg-emerald-100 py-2 rounded-lg transition-colors">
-            Contact Support
-          </button>
+        <div className="bg-gradient-to-br from-emerald-50/80 to-teal-50/50 border border-emerald-100/80 rounded-2xl p-3.5 text-center shadow-2xs">
+          <div className="w-10 h-10 mx-auto mb-1.5 rounded-xl bg-emerald-100/70 text-[#00A884] flex items-center justify-center">
+            <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/>
+              <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>
+            </svg>
+          </div>
+          <p className="text-xs font-bold text-[#071B49] leading-tight">Better Health</p>
+          <p className="text-[11px] font-semibold text-[#00A884] leading-tight mt-0.5">Brighter Tomorrow</p>
         </div>
       </div>
       </div>

@@ -31,7 +31,7 @@ export default function Layout() {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden print:overflow-visible">
         <div className="print:hidden"><Header onMenuClick={() => setIsMobileSidebarOpen(true)} /></div>
         <main className="flex-1 overflow-y-auto p-4 md:p-8 print:overflow-visible print:p-0">
-          <div className="max-w-7xl mx-auto space-y-6">
+          <div className="max-w-7xl xl:max-w-[1520px] mx-auto space-y-6">
             <Outlet />
           </div>
         </main>

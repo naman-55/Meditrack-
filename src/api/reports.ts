@@ -11,11 +11,14 @@ export interface MedicalReport {
 
 export interface Measurement {
   id: number;
+  report_id?: number;
   parameter: string;
   raw_value: string;
   normalized_value: string;
   unit: string;
   report_date: string;
+  validation_status?: string;
+  source_text?: string | null;
 }
 
 export interface Contradiction {
@@ -82,12 +85,45 @@ export interface FutureOutlook {
   created_at?: string;
 }
 
+export interface StructuredFinding {
+  parameter: string;
+  value: string;
+  unit: string;
+  status: string;
+  statusVariant: 'high' | 'borderline' | 'normal' | 'low';
+  date?: string;
+  report?: string;
+  trend?: string;
+}
+
+export interface StructuredEvidence {
+  priority: 'High Priority' | 'Medium Priority' | 'Low Priority';
+  explanation: string;
+  findings: StructuredFinding[];
+  whyRecommended: string[];
+  ruleReference: string;
+  sourceReport?: string;
+  suggestedDiscussionPoints?: string[];
+}
+
 export interface SpecialtyGuidance {
   id: number;
   domain: string;
   suggested_specialty: string;
   evidence: string;
   rule_version: string;
+  created_at?: string;
+}
+
+export interface HealthSnapshot {
+  reportCount: number;
+  measurementCount: number;
+  parametersAnalyzed: number;
+  abnormalResults: number;
+  trendsToMonitor: number;
+  specialtiesSuggested: number;
+  lastUpdated: string;
+  status: 'Analysis up to date' | 'Analysis needs refresh' | 'Analysis processing' | 'No medical data';
 }
 
 export const reportsService = {
@@ -137,7 +173,19 @@ export const reportsService = {
   getSpecialtyGuidance: async (): Promise<SpecialtyGuidance[]> => {
     return apiClient.get('/api/specialty');
   },
-  analyzeSpecialtyGuidance: async (): Promise<{ message: string, guidances: SpecialtyGuidance[] }> => {
+  getSpecialtySnapshot: async (): Promise<HealthSnapshot> => {
+    return apiClient.get('/api/specialty/snapshot');
+  },
+  analyzeSpecialtyGuidance: async (): Promise<{ message: string, guidances: SpecialtyGuidance[], snapshot?: HealthSnapshot }> => {
     return apiClient.post('/api/specialty/analyze', {});
+  },
+  chatWithAI: async (message: string): Promise<{ message: string }> => {
+    return apiClient.post('/api/ai/chat', { message });
+  },
+  getChatHistory: async (): Promise<Array<{ id: string; role: 'user' | 'assistant'; content: string; timestamp: string }>> => {
+    return apiClient.get('/api/ai/chat/history');
+  },
+  clearChatHistory: async (): Promise<{ success: boolean; message?: string }> => {
+    return apiClient.delete('/api/ai/chat/history');
   }
 };

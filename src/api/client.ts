@@ -147,7 +147,12 @@ const handleResponse = async (res: Response) => {
       const parsed = JSON.parse(text);
       errorMsg = parsed.error || parsed.detail || parsed.message || text;
     } catch (e) {}
-    throw new Error(errorMsg);
+    const err: any = new Error(errorMsg);
+    err.status = res.status;
+    try {
+      err.code = JSON.parse(text).code;
+    } catch (e) {}
+    throw err;
   }
   return res.json();
 };
