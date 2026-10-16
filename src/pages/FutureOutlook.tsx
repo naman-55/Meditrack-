@@ -473,7 +473,7 @@ export default function FutureOutlookPage() {
                                   <p className="text-xs text-slate-400 dark:text-[#8297B2] italic py-4 text-center">
                                     No validated points extractable for this biomarker.
                                   </p>
-                                ) : (
+                               ) : (
                                   <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                                     {history.map((pt, idx) => (
                                       <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 rounded bg-slate-50 dark:bg-[#07111D] dark:border dark:border-[#20364A]/50">

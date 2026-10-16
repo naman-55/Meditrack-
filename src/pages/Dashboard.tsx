@@ -521,10 +521,10 @@ export default function Dashboard() {
         </div>
       </div>
       
-      <div className="mt-8 bg-slate-50 border border-slate-200 rounded-xl p-6 flex flex-col items-center justify-center text-center shadow-sm">
-        <ShieldCheck className="w-8 h-8 text-slate-300 mb-3" />
-        <h5 className="font-bold text-slate-700 text-sm mb-1">Disclaimer</h5>
-        <p className="text-xs text-slate-500 max-w-md leading-relaxed">
+      <div className="mt-8 bg-slate-50 dark:bg-[#0D1B2A] border border-slate-200 dark:border-[#20364A] rounded-2xl p-6 flex flex-col items-center justify-center text-center shadow-sm">
+        <ShieldCheck className="w-8 h-8 text-slate-300 dark:text-[#7186A3] mb-3" />
+        <h5 className="font-bold text-slate-700 dark:text-[#F1F5FB] text-sm mb-1">Disclaimer</h5>
+        <p className="text-xs text-slate-500 dark:text-[#7186A3] max-w-md leading-relaxed">
           This is an AI-assisted health analysis tool for informational purposes only. It does not replace professional medical advice, diagnosis, or treatment.
         </p>
       </div>

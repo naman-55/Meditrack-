@@ -10,6 +10,7 @@ interface SummaryCardProps {
   icon: React.ElementType;
   iconColor: string;
   iconBg: string;
+  accent: 'blue' | 'purple' | 'red' | 'teal';
   valueColor?: string;
   waveColor?: string;
 }

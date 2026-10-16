@@ -14,6 +14,7 @@ export interface TrustedContact {
   consent_sms?: number;
   status: string;
   created_at: string;
+  updated_at?: string | null;
 }
 
 export interface NotificationDelivery {
@@ -63,7 +64,7 @@ export const familyService = {
   updateContact: async (id: number, contact: Partial<TrustedContact>): Promise<TrustedContact> => {
     return apiClient.put(`/api/contacts/${id}`, contact);
   },
-  deleteContact: async (id: number): Promise<void> => {
+  deleteContact: async (id: number): Promise<{ success: boolean; contact: TrustedContact }> => {
     return apiClient.delete(`/api/contacts/${id}`);
   },
   getAlerts: async (): Promise<HealthAlert[]> => {

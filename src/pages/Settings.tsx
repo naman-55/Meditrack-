@@ -56,6 +56,10 @@ export default function Settings() {
     preferences, 
     setAppearance, 
     setNotification, 
+    setNotificationFrequency,
+    notificationPrefsLoaded,
+    notificationSaving,
+    notificationError,
     setUnit, 
     setPrivacy, 
     resetPreferences 
@@ -63,9 +67,6 @@ export default function Settings() {
 
   // Active Tab
   const [activeTab, setActiveTab] = useState<'all' | 'appearance' | 'notifications' | 'units' | 'privacy' | 'security' | 'account'>('all');
-
-  // Notification frequency state
-  const [notifFrequency, setNotifFrequency] = useState<'instant' | 'daily' | 'weekly'>('instant');
 
   // Change Password State
   const [currentPassword, setCurrentPassword] = useState('');
@@ -335,10 +336,11 @@ export default function Settings() {
               type="button"
               onClick={() => {
                 if (window.confirm('Reset all display, notification, and unit preferences to defaults?')) {
-                  resetPreferences();
+                  void resetPreferences();
                 }
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[#DCE5EC] bg-white hover:bg-slate-50 text-xs font-semibold text-[#64748B] hover:text-[#071B49] transition-all shadow-2xs"
+              disabled={!notificationPrefsLoaded || notificationSaving !== null}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[#DCE5EC] bg-white hover:bg-slate-50 text-xs font-semibold text-[#64748B] hover:text-[#071B49] transition-all shadow-2xs disabled:cursor-wait disabled:opacity-60"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Reset Defaults</span>
@@ -394,7 +396,7 @@ export default function Settings() {
               <label className="text-xs font-bold text-[#071B49] uppercase tracking-wider block">
                 Color Theme
               </label>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div role="radiogroup" aria-label="Color theme" className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {[
                   { id: 'Light', label: 'Light Mode', desc: 'Crisp clinical white & navy', icon: Sun },
                   { id: 'Dark', label: 'Dark Mode', desc: 'Reduced glare for night rounds', icon: Moon },
@@ -405,9 +407,25 @@ export default function Settings() {
                   return (
                     <div
                       key={th.id}
+                      role="radio"
+                      aria-checked={isSelected}
+                      tabIndex={isSelected ? 0 : -1}
                       onClick={() => setAppearance('theme', th.id as any)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setAppearance('theme', th.id as any);
+                        } else if (['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'].includes(event.key)) {
+                          event.preventDefault();
+                          const radios = Array.from(event.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="radio"]') || []);
+                          const direction = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1;
+                          const nextIndex = (radios.indexOf(event.currentTarget) + direction + radios.length) % radios.length;
+                          radios[nextIndex]?.focus();
+                          radios[nextIndex]?.click();
+                        }
+                      }}
                       className={cn(
-                        "p-4 rounded-xl border cursor-pointer transition-all flex flex-col justify-between gap-3 relative select-none",
+                        "p-4 rounded-xl border cursor-pointer transition-all flex flex-col justify-between gap-3 relative select-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#00A884]",
                         isSelected
                           ? "border-[#00A884] bg-emerald-50/40 ring-2 ring-[#00A884]/20"
                           : "border-[#DCE5EC] bg-white hover:border-slate-300 hover:bg-slate-50/50"
@@ -476,23 +494,36 @@ export default function Settings() {
                 <Bell className="w-5 h-5" />
               </div>
               <div>
-                <h2 className="text-base font-bold text-[#071B49]">Notifications & Clinical Alerts</h2>
-                <p className="text-xs text-[#64748B]">Configure real-time clinical notifications, abnormal lab alarms, and medication prompts.</p>
+                <h2 className="text-base font-bold text-[#071B49]">Notifications & Preferences</h2>
+                <p className="text-xs text-[#64748B]">Save your channel and reminder preferences to your account.</p>
               </div>
             </div>
 
+            {notificationSaving && <p role="status" className="text-xs text-[#64748B]">Saving notification setting…</p>}
+            {notificationError && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{notificationError}</p>}
+            <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-[#64748B]">
+              These controls save your preferences. Email, SMS, browser push, scheduled reminders, clinical alert rules, and digest delivery are not configured, so changing a preference will not send a notification.
+            </p>
+
+            {!notificationPrefsLoaded ? (
+              <div role="status" className="space-y-3 py-2" aria-label="Loading saved notification settings">
+                {[1, 2, 3, 4, 5].map((row) => <div key={row} className="h-14 rounded-xl bg-slate-100 animate-pulse" />)}
+              </div>
+            ) : (
+              <>
             <div className="divide-y divide-[#DCE5EC]">
               {/* Email Notifications */}
               <div className="py-4 first:pt-0 flex items-center justify-between gap-4">
                 <div>
                   <span className="text-sm font-bold text-[#071B49] block">Email Notifications</span>
                   <p className="text-xs text-[#64748B] mt-0.5">
-                    Receive consolidated clinical reports, monthly trend summaries, and vital health updates at {user?.email || 'your email'}.
+                    Preference for email notices to {user?.email || 'your account email'}; email delivery is not configured.
                   </p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setNotification('emailNotifications', !preferences.notifications.emailNotifications)}
+                  onClick={() => void setNotification('emailNotifications', !preferences.notifications.emailNotifications)}
+                  disabled={!notificationPrefsLoaded || notificationSaving !== null}
                   className={cn(
                     "relative inline-flex h-6 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-inner",
                     preferences.notifications.emailNotifications ? "bg-[#00A884]" : "bg-slate-200"
@@ -509,17 +540,40 @@ export default function Settings() {
                 </button>
               </div>
 
+              {/* SMS Notifications */}
+              <div className="py-4 flex items-center justify-between gap-4">
+                <div>
+                  <span className="text-sm font-bold text-[#071B49] block">SMS Alerts</span>
+                  <p className="text-xs text-[#64748B] mt-0.5">Preference for text alerts; an SMS provider is not configured.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void setNotification('smsAlerts', !preferences.notifications.smsAlerts)}
+                  disabled={!notificationPrefsLoaded || notificationSaving !== null}
+                  className={cn(
+                    "relative inline-flex h-6 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-inner disabled:cursor-wait disabled:opacity-60",
+                    preferences.notifications.smsAlerts ? "bg-[#00A884]" : "bg-slate-200"
+                  )}
+                  role="switch"
+                  aria-checked={preferences.notifications.smsAlerts}
+                  aria-label="SMS alerts preference"
+                >
+                  <span className={cn("pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out", preferences.notifications.smsAlerts ? "translate-x-6" : "translate-x-0")} />
+                </button>
+              </div>
+
               {/* Push Notifications */}
               <div className="py-4 flex items-center justify-between gap-4">
                 <div>
                   <span className="text-sm font-bold text-[#071B49] block">Push Notifications</span>
                   <p className="text-xs text-[#64748B] mt-0.5">
-                    Immediate high-priority on-screen alerts for critical readings and doctor review messages.
+                    Preference for browser alerts; browser push is not configured.
                   </p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setNotification('pushNotifications', !preferences.notifications.pushNotifications)}
+                  onClick={() => void setNotification('pushNotifications', !preferences.notifications.pushNotifications)}
+                  disabled={!notificationPrefsLoaded || notificationSaving !== null}
                   className={cn(
                     "relative inline-flex h-6 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-inner",
                     preferences.notifications.pushNotifications ? "bg-[#00A884]" : "bg-slate-200"
@@ -541,12 +595,13 @@ export default function Settings() {
                 <div>
                   <span className="text-sm font-bold text-[#071B49] block">Health & Medication Reminders</span>
                   <p className="text-xs text-[#64748B] mt-0.5">
-                    Daily scheduled reminders for medication doses, blood pressure logs, and vitals check-ins.
+                    Saves your preference. Reminder scheduling is not configured.
                   </p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setNotification('healthReminders', !preferences.notifications.healthReminders)}
+                  onClick={() => void setNotification('healthReminders', !preferences.notifications.healthReminders)}
+                  disabled={!notificationPrefsLoaded || notificationSaving !== null}
                   className={cn(
                     "relative inline-flex h-6 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-inner",
                     preferences.notifications.healthReminders ? "bg-[#00A884]" : "bg-slate-200"
@@ -568,17 +623,18 @@ export default function Settings() {
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-bold text-[#071B49]">Lab Report Alerts</span>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#2563EB]/10 text-[#2563EB]">
-                      Critical Values
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                      Preference only
                     </span>
                   </div>
                   <p className="text-xs text-[#64748B] mt-0.5">
-                    Automatic emergency alerts when abnormal biomarkers (e.g. Troponin, HbA1c, Potassium) are identified.
+                    Saves your preference. Validated clinical alert rules are not configured.
                   </p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setNotification('labReportAlerts', !preferences.notifications.labReportAlerts)}
+                  onClick={() => void setNotification('labReportAlerts', !preferences.notifications.labReportAlerts)}
+                  disabled={!notificationPrefsLoaded || notificationSaving !== null}
                   className={cn(
                     "relative inline-flex h-6 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-inner",
                     preferences.notifications.labReportAlerts ? "bg-[#00A884]" : "bg-slate-200"
@@ -599,21 +655,22 @@ export default function Settings() {
             {/* Notification Frequency Selector */}
             <div className="pt-4 border-t border-[#DCE5EC] space-y-3">
               <label className="text-xs font-bold text-[#071B49] uppercase tracking-wider block">
-                Notification Delivery Cadence
+                Preferred Notification Cadence
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {[
-                  { id: 'instant', title: 'Instant Real-time', desc: 'As soon as lab results arrive' },
-                  { id: 'daily', title: 'Daily Digest', desc: 'Summarized at 08:00 AM each morning' },
-                  { id: 'weekly', title: 'Weekly Briefing', desc: 'Every Monday with health trend analysis' },
+                  { id: 'instant', title: 'Instant', desc: 'Saved preference only' },
+                  { id: 'daily', title: 'Daily', desc: 'Saved preference only' },
+                  { id: 'weekly', title: 'Weekly', desc: 'Saved preference only' },
                 ].map((freq) => (
                   <button
                     key={freq.id}
                     type="button"
-                    onClick={() => setNotifFrequency(freq.id as any)}
+                    onClick={() => void setNotificationFrequency(freq.id as 'instant' | 'daily' | 'weekly')}
+                    disabled={!notificationPrefsLoaded || notificationSaving !== null}
                     className={cn(
                       "p-3 rounded-xl border text-left transition-all",
-                      notifFrequency === freq.id
+                      preferences.notifications.frequency === freq.id
                         ? "border-[#00A884] bg-emerald-50/50 ring-1 ring-[#00A884]"
                         : "border-[#DCE5EC] bg-white hover:bg-slate-50"
                     )}
@@ -624,6 +681,8 @@ export default function Settings() {
                 ))}
               </div>
             </div>
+              </>
+            )}
           </section>
         )}
 

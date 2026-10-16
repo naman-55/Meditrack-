@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import { Menu } from 'lucide-react';
@@ -7,6 +7,7 @@ import { cn } from '../utils/cn';
 
 export default function Layout() {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const isSpecialtyGuidance = useLocation().pathname === '/specialty-guidance';
 
   return (
     <div className="flex h-screen bg-[#F7F9FB] dark:bg-[#040D1A] text-slate-900 dark:text-[#FFFFFF] font-sans overflow-hidden print:h-auto print:overflow-visible print:bg-white transition-colors duration-150">
@@ -36,7 +37,11 @@ export default function Layout() {
         <main className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6 lg:p-8 print:overflow-visible print:p-0 bg-[#F7F9FB] dark:bg-[#040D1A] transition-colors duration-150">
           <div className="max-w-7xl xl:max-w-[1520px] mx-auto space-y-6">
             <Outlet />
-          </div>
+          ) : (
+            <div className="max-w-7xl xl:max-w-[1520px] mx-auto space-y-6">
+              <Outlet />
+            </div>
+          )}
         </main>
       </div>
     </div>

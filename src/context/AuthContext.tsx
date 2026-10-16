@@ -76,13 +76,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = async (credentials: LoginCredentials) => {
-    const data = await authService.login(credentials);
-    if (data.user) {
-      setUser(data.user);
-    } else {
-      const userData = await authService.getCurrentUser();
-      setUser(userData);
-    }
+    await authService.login(credentials);
+    const userData = await authService.getCurrentUser();
+    setUser(userData);
   };
 
   const register = async (credentials: RegisterCredentials) => {

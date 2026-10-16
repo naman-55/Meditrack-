@@ -71,7 +71,7 @@ export default function TrendSummary({ trend, isLoading, error }: { trend?: Tren
           <div className="w-full h-32 flex items-center justify-center mb-3">
              <ResponsiveContainer width="100%" height="100%">
                <LineChart data={[{v: 10}, {v: 15}, {v: 8}, {v: 12}]}>
-                 <Line type="monotone" dataKey="v" stroke="#cbd5e1" strokeWidth={3} dot={false} isAnimationActive={false} />
+                 <Line type="monotone" dataKey="v" stroke="var(--chart-grid)" strokeWidth={3} dot={false} isAnimationActive={false} />
                </LineChart>
              </ResponsiveContainer>
           </div>
@@ -100,23 +100,23 @@ export default function TrendSummary({ trend, isLoading, error }: { trend?: Tren
           <div className="flex-1 min-h-[160px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--chart-grid)" />
                 <XAxis 
                   dataKey="shortDate" 
                   axisLine={false}
                   tickLine={false}
-                  tick={{ fontSize: 10, fill: '#64748b' }}
+                  tick={{ fontSize: 10, fill: 'var(--chart-label)' }}
                   dy={10}
                 />
                 <YAxis 
                   axisLine={false}
                   tickLine={false}
-                  tick={{ fontSize: 10, fill: '#64748b' }}
+                  tick={{ fontSize: 10, fill: 'var(--chart-label)' }}
                   domain={['auto', 'auto']}
                 />
                 <Tooltip 
-                  contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                  labelStyle={{ fontWeight: 'bold', color: '#334155', marginBottom: '4px' }}
+                  contentStyle={{ borderRadius: '8px', border: '1px solid var(--border)', backgroundColor: 'var(--chart-tooltip)', color: 'var(--chart-tooltip-foreground)', fontSize: '12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.2)' }}
+                  labelStyle={{ fontWeight: 'bold', color: 'var(--chart-tooltip-foreground)', marginBottom: '4px' }}
                   itemStyle={{ color: '#0ea5e9', fontWeight: '500' }}
                 />
                 <Line 
@@ -125,7 +125,7 @@ export default function TrendSummary({ trend, isLoading, error }: { trend?: Tren
                   name="Value"
                   stroke={trend.direction === 'improving' ? '#10b981' : trend.direction === 'declining' ? '#f43f5e' : '#64748b'} 
                   strokeWidth={3} 
-                  dot={{ r: 4, strokeWidth: 2, fill: '#fff' }} 
+                  dot={{ r: 4, strokeWidth: 2, fill: 'var(--chart-dot-outline)' }} 
                   activeDot={{ r: 6, strokeWidth: 0, fill: '#0ea5e9' }} 
                 />
               </LineChart>

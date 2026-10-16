@@ -28,6 +28,59 @@ import { authService } from '../api/auth';
 import { useAlertNotifications } from '../context/AlertNotificationContext';
 import { useNavigate } from 'react-router-dom';
 
+type ContactForm = Pick<TrustedContact, 'name' | 'relationship' | 'contact_method' | 'contact_value' | 'status'>;
+type ContactField = keyof ContactForm;
+type PreferenceKey = 'notification_email' | 'notification_sms' | 'notification_push';
+type NotificationPreferences = Record<PreferenceKey, boolean>;
+
+const EMPTY_CONTACT: ContactForm = {
+  name: '', relationship: '', contact_method: 'EMAIL', contact_value: '', status: 'ACTIVE'
+};
+const PREFERENCE_OPTIONS = [
+  ['notification_email', 'Email Notifications', 'Email delivery is not configured; this stores your preference only.'],
+  ['notification_sms', 'SMS Alerts', 'SMS delivery is not configured; this stores your preference only.'],
+  ['notification_push', 'Push Notifications', 'Browser push is not configured; this stores your preference only.']
+] as const;
+
+function validateContact(form: ContactForm): Partial<Record<ContactField, string>> {
+  const errors: Partial<Record<ContactField, string>> = {};
+  const name = form.name.trim();
+  const relationship = form.relationship.trim();
+  const value = form.contact_value.trim();
+
+  if (!name) errors.name = 'Enter the contact’s full name.';
+  else if (name.length > 100) errors.name = 'Name must be 100 characters or fewer.';
+  if (!relationship) errors.relationship = 'Enter the relationship.';
+  else if (relationship.length > 80) errors.relationship = 'Relationship must be 80 characters or fewer.';
+
+  if (form.contact_method === 'EMAIL') {
+    if (!value) errors.contact_value = 'Enter an email address.';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) || value.length > 254) errors.contact_value = 'Enter a valid email address.';
+  } else {
+    const digits = value.replace(/\D/g, '');
+    if (!value) errors.contact_value = 'Enter a phone number.';
+    else if (!/^\+?[\d\s().-]+$/.test(value) || digits.length < 7 || digits.length > 15) errors.contact_value = 'Enter a valid phone number with 7 to 15 digits.';
+  }
+
+  return errors;
+}
+
+function getAlertTitle(alert: HealthAlert) {
+  if (alert.type === 'REPORT_PROCESSED') return 'Report processing complete';
+  return alert.type || 'Health notification';
+}
+
+function getAlertStatus(alert: HealthAlert) {
+  if (alert.delivery_channel === 'IN_APP' || alert.status === 'RECORDED') return 'Recorded in MediTrack';
+  if (alert.status === 'DELIVERED') return 'Delivery unverified';
+  return alert.status || 'Status unavailable';
+}
+
+function formatAlertDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Date unavailable' : date.toLocaleString();
+}
+
 export default function FamilyAlerts() {
   const { user, updateUser } = useAuth();
   const { refreshAlerts } = useAlertNotifications();
@@ -35,9 +88,11 @@ export default function FamilyAlerts() {
 
   const [contacts, setContacts] = useState<TrustedContact[]>([]);
   const [alerts, setAlerts] = useState<HealthAlert[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [contactsLoading, setContactsLoading] = useState(true);
+  const [alertsLoading, setAlertsLoading] = useState(true);
+  const [contactsError, setContactsError] = useState('');
+  const [alertsError, setAlertsError] = useState('');
 
-  // Form State
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
@@ -65,19 +120,20 @@ export default function FamilyAlerts() {
   // Audit Modal State
   const [selectedAuditAlert, setSelectedAuditAlert] = useState<HealthAlert | null>(null);
 
-  // Preferences State (using user context)
-  const [prefs, setPrefs] = useState({
-    notification_email: user?.notification_email === 1,
-    notification_sms: user?.notification_sms === 1,
-    notification_push: user?.notification_push === 1,
-  });
+  const [prefs, setPrefs] = useState<NotificationPreferences | null>(null);
+  const [prefsLoading, setPrefsLoading] = useState(true);
+  const [prefsError, setPrefsError] = useState('');
+  const [savingPreference, setSavingPreference] = useState<PreferenceKey | null>(null);
 
   useEffect(() => {
-    fetchData();
+    void loadContacts();
+    void loadAlerts();
+    void loadPreferences();
   }, []);
 
-  const fetchData = async () => {
-    setLoading(true);
+  const loadContacts = async () => {
+    setContactsLoading(true);
+    setContactsError('');
     try {
       const [c, a] = await Promise.all([
         familyService.getContacts(),
@@ -88,7 +144,7 @@ export default function FamilyAlerts() {
     } catch (err) {
       console.error('Fetch error in FamilyAlerts:', err);
     } finally {
-      setLoading(false);
+      setContactsLoading(false);
     }
   };
 
@@ -141,40 +197,41 @@ export default function FamilyAlerts() {
     setShowForm(true);
   };
 
-  const handleDelete = async (id: number) => {
-    try {
-      await familyService.deleteContact(id);
-      setConfirmDeleteId(null);
-      fetchData();
-    } catch (err) {
-      console.error(err);
-    }
-  };
+  const handleSaveContact = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (isSavingContact) return;
+    const errors = validateContact(formData);
+    setFormErrors(errors);
+    setFormError('');
+    if (Object.keys(errors).length > 0) return;
 
-  const handleToggleStatus = async (c: TrustedContact) => {
+    setIsSavingContact(true);
+    setFeedback('');
+    setFeedbackIsError(false);
+    const payload: ContactForm = {
+      ...formData,
+      name: formData.name.trim(),
+      relationship: formData.relationship.trim(),
+      contact_value: formData.contact_method === 'EMAIL'
+        ? formData.contact_value.trim().toLowerCase()
+        : formData.contact_value.trim()
+    };
     try {
-      await familyService.updateContact(c.id, { ...c, status: c.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE' });
-      fetchData();
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handlePrefChange = async (key: keyof typeof prefs) => {
-    const newPrefs = { ...prefs, [key]: !prefs[key] };
-    setPrefs(newPrefs);
-    try {
-      if (user && updateUser) {
-        const updated = await authService.updateProfile({
-          ...user,
-          notification_email: newPrefs.notification_email ? 1 : 0,
-          notification_sms: newPrefs.notification_sms ? 1 : 0,
-          notification_push: newPrefs.notification_push ? 1 : 0
-        });
-        updateUser(updated);
+      if (editingId !== null) {
+        const saved = await familyService.updateContact(editingId, payload);
+        setContacts(current => current.map(contact => contact.id === saved.id ? saved : contact));
+        setFeedback('Trusted contact updated.');
+      } else {
+        const saved = await familyService.addContact(payload);
+        setContacts(current => [saved, ...current.filter(contact => contact.id !== saved.id)]);
+        setFeedback('Trusted contact added.');
       }
-    } catch (e) {
-      console.error('Failed to update preferences', e);
+      resetContactForm();
+    } catch (error: any) {
+      setFormError(error?.message || 'Unable to save this contact. Please try again.');
+      setFeedbackIsError(true);
+    } finally {
+      setIsSavingContact(false);
     }
   };
 

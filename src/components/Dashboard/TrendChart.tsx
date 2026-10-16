@@ -37,7 +37,7 @@ export default function TrendChart({
   isLoading, 
   error,
   type = 'single',
-  color = '#0ea5e9'
+  color = '#00D6B0'
 }: TrendChartProps) {
 
   const chartData = useMemo(() => {
@@ -166,7 +166,7 @@ export default function TrendChart({
                 type="monotone" 
                 dataKey="value" 
                 stroke={color} 
-                strokeWidth={3}
+                strokeWidth={2.5}
                 fillOpacity={1} 
                 fill={`url(#colorValue-${title?.replace(/[^a-zA-Z0-9]/g, '') || 'chart'})`} 
                 dot={{ r: 4, fill: color, strokeWidth: 0 }} activeDot={{ r: 6, strokeWidth: 0, fill: color }}
@@ -202,8 +202,8 @@ export default function TrendChart({
                 labelStyle={{ fontWeight: 'bold', color: isDarkMode ? '#F1F5FB' : '#334155', marginBottom: '4px' }}
                 itemStyle={{ fontWeight: 600 }}
               />
-              <Line type="monotone" dataKey="systolic" name="Systolic" stroke="#f43f5e" strokeWidth={3} dot={{ r: 4, fill: '#f43f5e', strokeWidth: 0 }} activeDot={{ r: 6, strokeWidth: 0, fill: '#f43f5e' }} />
-              <Line type="monotone" dataKey="diastolic" name="Diastolic" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, fill: '#3b82f6', strokeWidth: 0 }} activeDot={{ r: 6, strokeWidth: 0, fill: '#3b82f6' }} />
+              <Line type="monotone" dataKey="systolic" name="Systolic" stroke="#FF5368" strokeWidth={2.5} dot={{ r: 3.5, fill: '#FF5368', strokeWidth: 0 }} activeDot={{ r: 5.5, strokeWidth: 2, stroke: '#0D1B2A', fill: '#FF5368' }} />
+              <Line type="monotone" dataKey="diastolic" name="Diastolic" stroke="#2684FF" strokeWidth={2.5} dot={{ r: 3.5, fill: '#2684FF', strokeWidth: 0 }} activeDot={{ r: 5.5, strokeWidth: 2, stroke: '#0D1B2A', fill: '#2684FF' }} />
             </LineChart>
           )}
         </ResponsiveContainer>

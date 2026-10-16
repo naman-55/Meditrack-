@@ -33,6 +33,9 @@ export interface User {
   notification_email?: number;
   notification_sms?: number;
   notification_push?: number;
+  notification_health_reminders?: number;
+  notification_lab_report_alerts?: number;
+  notification_frequency?: 'instant' | 'daily' | 'weekly';
 }
 
 export interface LoginCredentials {

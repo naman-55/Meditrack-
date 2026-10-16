@@ -49,6 +49,8 @@ class AIService {
         this.client = new GoogleGenAI({
           apiKey: envConfig.GEMINI_API_KEY,
           httpOptions: {
+            timeout: 30000,
+            retryOptions: { attempts: 2 },
             headers: {
               'User-Agent': 'meditrack-v3.1-app',
             }

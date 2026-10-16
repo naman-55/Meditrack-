@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileText, CheckCircle2, Clock, AlertCircle } from 'lucide-react';
+import { FileText, AlertCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Skeleton } from '../common/Skeleton';
 

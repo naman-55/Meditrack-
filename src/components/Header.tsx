@@ -15,7 +15,9 @@ import {
   ExternalLink,
   ShieldAlert,
   Clock,
-  Sparkles
+  Sparkles,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '../utils/cn';
@@ -131,7 +133,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
       </div>
 
       {/* Center & Right: Search, Alerts, User Profile */}
-      <div className="flex items-center gap-3 md:gap-5">
+      <div className="flex items-center gap-3 md:gap-4">
         
         {/* Global Search Box (Desktop & Tablet) */}
         <div ref={searchContainerRef} className="relative hidden sm:block w-72 lg:w-84">
@@ -333,12 +335,12 @@ export default function Header({ onMenuClick }: HeaderProps) {
                 )}
               </div>
 
-              <div className="max-h-[380px] overflow-y-auto divide-y divide-[#DCE5EC]/60">
+              <div className="max-h-[380px] overflow-y-auto divide-y divide-[#DCE5EC]/60 dark:divide-[#20364A]">
                 {isLoadingAlerts ? (
                   <AlertListSkeleton count={3} />
                 ) : alerts.length === 0 ? (
-                  <div className="py-8 px-4 text-center text-xs text-[#64748B] space-y-1">
-                    <p className="font-bold text-[#071B49]">No active clinical alerts</p>
+                  <div className="py-8 px-4 text-center text-xs text-[#64748B] dark:text-[#7186A3] space-y-1">
+                    <p className="font-bold text-[#071B49] dark:text-[#F1F5FB]">No active clinical alerts</p>
                     <p>Alerts are generated when notable risk markers or updates are detected.</p>
                   </div>
                 ) : (
@@ -437,6 +439,17 @@ export default function Header({ onMenuClick }: HeaderProps) {
             </div>
           )}
         </div>
+
+        {/* Theme Toggle Button */}
+        <button
+          type="button"
+          onClick={toggleTheme}
+          className="w-10 h-10 rounded-xl flex items-center justify-center text-[#64748B] hover:text-[#071B49] hover:bg-slate-50 border border-[#DCE5EC] bg-white dark:bg-[#081421] dark:text-[#A6B8CF] dark:hover:text-[#F1F5FB] dark:hover:bg-[#14283B] dark:border-[#20364A] transition-colors cursor-pointer"
+          title={isDarkMode ? "Switch to Light Theme" : "Switch to Dark Theme"}
+          aria-label="Toggle Theme"
+        >
+          {isDarkMode ? <Sun className="w-4 h-4 text-[#F5B942]" /> : <Moon className="w-4 h-4 text-[#A6B8CF]" />}
+        </button>
 
         {/* Settings Full-Screen Page Button */}
         <button

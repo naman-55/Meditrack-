@@ -163,7 +163,7 @@ export default function NearbyCare() {
                 <p className="text-xs text-[#64748B] dark:text-[#8297B2]">Try expanding search radius on the Care Near Me page.</p>
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2.5">
                 {providers.map((p) => (
                   <div key={p.id} className="p-2.5 rounded-xl border border-[#DCE5EC] dark:border-[#20364A] bg-[#F8FAFC]/60 dark:bg-[#07111D] hover:bg-[#F8FAFC] dark:hover:bg-[#102033] transition-colors flex items-start justify-between gap-2">
                     <div className="min-w-0">
