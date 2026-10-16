@@ -1,16 +1,14 @@
 import React, { useState } from 'react';
-import { Outlet, useLocation } from 'react-router-dom';
+import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Header from './Header';
-import { Menu } from 'lucide-react';
 import { cn } from '../utils/cn';
 
 export default function Layout() {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const isSpecialtyGuidance = useLocation().pathname === '/specialty-guidance';
 
   return (
-    <div className="flex h-screen bg-[#F7F9FB] dark:bg-[#040D1A] text-slate-900 dark:text-[#FFFFFF] font-sans overflow-hidden print:h-auto print:overflow-visible print:bg-white transition-colors duration-150">
+    <div className="flex h-screen bg-[#F7F9FB] dark:bg-[#050D18] text-slate-900 dark:text-[#F3F7FC] font-sans overflow-hidden print:h-auto print:overflow-visible print:bg-white transition-colors duration-150">
       {/* Mobile Sidebar Overlay */}
       {isMobileSidebarOpen && (
         <div 
@@ -32,16 +30,12 @@ export default function Layout() {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden print:overflow-visible bg-[#F7F9FB] dark:bg-[#040D1A]">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden print:overflow-visible bg-[#F7F9FB] dark:bg-[#050D18]">
         <div className="print:hidden"><Header onMenuClick={() => setIsMobileSidebarOpen(true)} /></div>
-        <main className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6 lg:p-8 print:overflow-visible print:p-0 bg-[#F7F9FB] dark:bg-[#040D1A] transition-colors duration-150">
+        <main className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6 lg:p-8 print:overflow-visible print:p-0 bg-[#F7F9FB] dark:bg-[#050D18] transition-colors duration-150">
           <div className="max-w-7xl xl:max-w-[1520px] mx-auto space-y-6">
             <Outlet />
-          ) : (
-            <div className="max-w-7xl xl:max-w-[1520px] mx-auto space-y-6">
-              <Outlet />
-            </div>
-          )}
+          </div>
         </main>
       </div>
     </div>

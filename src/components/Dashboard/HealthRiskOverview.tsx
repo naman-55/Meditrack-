@@ -1,5 +1,5 @@
 import React from 'react';
-import { Activity, Heart, FileText, Shield, AlertCircle } from 'lucide-react';
+import { Activity, Heart, FileText, Shield, AlertCircle, ClipboardList } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { Skeleton } from '../common/Skeleton';
 

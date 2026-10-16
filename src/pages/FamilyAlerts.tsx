@@ -71,7 +71,7 @@ function getAlertTitle(alert: HealthAlert) {
 }
 
 function getAlertStatus(alert: HealthAlert) {
-  if (alert.delivery_channel === 'IN_APP' || alert.status === 'RECORDED') return 'Recorded in MediTrack';
+  if ((alert as any).delivery_channel === 'IN_APP' || alert.status === 'RECORDED') return 'Recorded in MediTrack';
   if (alert.status === 'DELIVERED') return 'Delivery unverified';
   return alert.status || 'Status unavailable';
 }
@@ -120,16 +120,46 @@ export default function FamilyAlerts() {
   // Audit Modal State
   const [selectedAuditAlert, setSelectedAuditAlert] = useState<HealthAlert | null>(null);
 
-  const [prefs, setPrefs] = useState<NotificationPreferences | null>(null);
-  const [prefsLoading, setPrefsLoading] = useState(true);
+  const [prefs, setPrefs] = useState<NotificationPreferences>({
+    notification_email: true,
+    notification_sms: false,
+    notification_push: true
+  });
+  const [prefsLoading, setPrefsLoading] = useState(false);
   const [prefsError, setPrefsError] = useState('');
   const [savingPreference, setSavingPreference] = useState<PreferenceKey | null>(null);
 
-  useEffect(() => {
-    void loadContacts();
-    void loadAlerts();
-    void loadPreferences();
-  }, []);
+  const loading = contactsLoading || alertsLoading;
+
+  const loadAlerts = async () => {
+    setAlertsLoading(true);
+    setAlertsError('');
+    try {
+      const a = await familyService.getAlerts();
+      setAlerts(a);
+    } catch (err) {
+      console.error('Fetch alerts error in FamilyAlerts:', err);
+      setAlertsError('Failed to load alerts');
+    } finally {
+      setAlertsLoading(false);
+    }
+  };
+
+  const loadPreferences = async () => {
+    setPrefsLoading(true);
+    setPrefsError('');
+    try {
+      if (user) {
+        setPrefs({
+          notification_email: Boolean(user.notification_email ?? true),
+          notification_sms: Boolean(user.notification_sms ?? false),
+          notification_push: Boolean(user.notification_push ?? true)
+        });
+      }
+    } finally {
+      setPrefsLoading(false);
+    }
+  };
 
   const loadContacts = async () => {
     setContactsLoading(true);
@@ -146,6 +176,21 @@ export default function FamilyAlerts() {
     } finally {
       setContactsLoading(false);
     }
+  };
+
+  const fetchData = loadContacts;
+
+  useEffect(() => {
+    void loadContacts();
+    void loadAlerts();
+    void loadPreferences();
+  }, []);
+
+  const resetContactForm = () => {
+    setFormData({ name: '', relationship: 'Family Member', contact_method: 'EMAIL', contact_value: '', status: 'ACTIVE' });
+    setFormError(null);
+    setEditingId(null);
+    setShowForm(false);
   };
 
   const handleSaveContact = async (e: React.FormEvent) => {
@@ -175,10 +220,8 @@ export default function FamilyAlerts() {
       } else {
         await familyService.addContact(formData);
       }
-      setShowForm(false);
-      setEditingId(null);
-      setFormData({ name: '', relationship: 'Family Member', contact_method: 'EMAIL', contact_value: '', status: 'ACTIVE' });
-      fetchData();
+      resetContactForm();
+      await loadContacts();
     } catch (err: any) {
       setFormError(err.message || 'Failed to save contact.');
     }
@@ -197,41 +240,40 @@ export default function FamilyAlerts() {
     setShowForm(true);
   };
 
-  const handleSaveContact = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (isSavingContact) return;
-    const errors = validateContact(formData);
-    setFormErrors(errors);
-    setFormError('');
-    if (Object.keys(errors).length > 0) return;
-
-    setIsSavingContact(true);
-    setFeedback('');
-    setFeedbackIsError(false);
-    const payload: ContactForm = {
-      ...formData,
-      name: formData.name.trim(),
-      relationship: formData.relationship.trim(),
-      contact_value: formData.contact_method === 'EMAIL'
-        ? formData.contact_value.trim().toLowerCase()
-        : formData.contact_value.trim()
-    };
+  const handleDelete = async (id: number) => {
     try {
-      if (editingId !== null) {
-        const saved = await familyService.updateContact(editingId, payload);
-        setContacts(current => current.map(contact => contact.id === saved.id ? saved : contact));
-        setFeedback('Trusted contact updated.');
-      } else {
-        const saved = await familyService.addContact(payload);
-        setContacts(current => [saved, ...current.filter(contact => contact.id !== saved.id)]);
-        setFeedback('Trusted contact added.');
+      await familyService.deleteContact(id);
+      setContacts(prev => prev.filter(c => c.id !== id));
+      setConfirmDeleteId(null);
+    } catch (err) {
+      console.error('Delete contact error:', err);
+    }
+  };
+
+  const handleToggleStatus = async (c: TrustedContact) => {
+    const newStatus = c.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    try {
+      const updated = await familyService.updateContact(c.id, { ...c, status: newStatus });
+      setContacts(prev => prev.map(item => item.id === c.id ? updated : item));
+    } catch (err) {
+      console.error('Toggle status error:', err);
+    }
+  };
+
+  const handlePrefChange = async (key: PreferenceKey) => {
+    if (!prefs) return;
+    const newVal = !prefs[key];
+    setPrefs(prev => prev ? ({ ...prev, [key]: newVal }) : prev);
+    setSavingPreference(key);
+    try {
+      await authService.updateProfile({ [key]: newVal ? 1 : 0 });
+      if (updateUser) {
+        updateUser({ [key]: newVal ? 1 : 0 } as any);
       }
-      resetContactForm();
-    } catch (error: any) {
-      setFormError(error?.message || 'Unable to save this contact. Please try again.');
-      setFeedbackIsError(true);
+    } catch (err) {
+      console.error('Update preference error:', err);
     } finally {
-      setIsSavingContact(false);
+      setSavingPreference(null);
     }
   };
 
@@ -247,7 +289,7 @@ export default function FamilyAlerts() {
         alert: res.alert,
         deliveries: res.deliveries
       });
-      fetchData();
+      await loadContacts();
       refreshAlerts();
     } catch (err: any) {
       setTestResult({
@@ -572,7 +614,7 @@ export default function FamilyAlerts() {
                 <label className="flex items-start gap-3 cursor-pointer group">
                   <input 
                     type="checkbox" 
-                    checked={prefs.notification_email} 
+                    checked={Boolean(prefs?.notification_email)} 
                     onChange={() => handlePrefChange('notification_email')} 
                     className="mt-0.5 h-4 w-4 rounded border-slate-300 dark:border-[#20364B] bg-white dark:bg-[#0A1625] text-indigo-600 focus:ring-indigo-500" 
                   />
@@ -587,7 +629,7 @@ export default function FamilyAlerts() {
                 <label className="flex items-start gap-3 cursor-pointer group">
                   <input 
                     type="checkbox" 
-                    checked={prefs.notification_sms} 
+                    checked={Boolean(prefs?.notification_sms)} 
                     onChange={() => handlePrefChange('notification_sms')} 
                     className="mt-0.5 h-4 w-4 rounded border-slate-300 dark:border-[#20364B] bg-white dark:bg-[#0A1625] text-indigo-600 focus:ring-indigo-500" 
                   />
@@ -602,7 +644,7 @@ export default function FamilyAlerts() {
                 <label className="flex items-start gap-3 cursor-pointer group">
                   <input 
                     type="checkbox" 
-                    checked={prefs.notification_push} 
+                    checked={Boolean(prefs?.notification_push)} 
                     onChange={() => handlePrefChange('notification_push')} 
                     className="mt-0.5 h-4 w-4 rounded border-slate-300 dark:border-[#20364B] bg-white dark:bg-[#0A1625] text-indigo-600 focus:ring-indigo-500" 
                   />

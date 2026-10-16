@@ -23,6 +23,7 @@ import { useNavigate } from 'react-router-dom';
 import { cn } from '../utils/cn';
 import { useAuth } from '../context/AuthContext';
 import { useAlertNotifications } from '../context/AlertNotificationContext';
+import { useSettings } from '../context/SettingsContext';
 import { apiClient } from '../api/client';
 import { AlertListSkeleton } from './common/Skeleton';
 
@@ -40,6 +41,11 @@ interface HeaderProps {
 export default function Header({ onMenuClick }: HeaderProps) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const { preferences, setAppearance } = useSettings();
+  const isDarkMode = preferences.appearance.theme === 'Dark' || (preferences.appearance.theme === 'System' && typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const toggleTheme = () => {
+    setAppearance('theme', isDarkMode ? 'Light' : 'Dark');
+  };
   const { 
     alerts, 
     unreadCount: unreadAlertsCount, 
