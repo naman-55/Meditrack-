@@ -31,11 +31,13 @@ import {
   Calendar,
   User,
   HeartPulse,
+  FlaskConical,
   ExternalLink
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useSettings } from '../context/SettingsContext';
 import { useAuth } from '../context/AuthContext';
+import { TableSkeleton } from '../components/common/Skeleton';
 import { cn } from '../utils/cn';
 
 interface ActiveSession {
@@ -742,6 +744,118 @@ export default function Settings() {
               </div>
             </div>
 
+            {/* Clinical Laboratory Panels Units */}
+            <div className="pt-4 border-t border-[#DCE5EC]">
+              <div className="flex items-center gap-2 mb-4">
+                <FlaskConical className="w-4 h-4 text-[#00A884]" />
+                <h4 className="text-xs font-bold uppercase tracking-wider text-[#071B49]">
+                  Laboratory Biomarker Units &amp; Formatting
+                </h4>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Blood Glucose */}
+                <div className="p-4 rounded-xl border border-[#DCE5EC] bg-[#F7F9FB] flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-[#071B49] block">Blood Glucose</span>
+                    <span className="text-[11px] text-[#64748B]">Fasting &amp; random plasma glucose</span>
+                  </div>
+                  <div className="inline-flex rounded-lg p-1 bg-white border border-[#DCE5EC] shadow-2xs">
+                    {(['mg/dL', 'mmol/L'] as const).map((unit) => (
+                      <button
+                        key={unit}
+                        type="button"
+                        onClick={() => setUnit('glucose', unit)}
+                        className={cn(
+                          "px-3 py-1 rounded-md text-xs font-bold transition-all",
+                          preferences.units.glucose === unit
+                            ? "bg-[#00A884] text-white shadow-2xs"
+                            : "text-[#64748B] hover:text-[#071B49]"
+                        )}
+                      >
+                        {unit}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Cholesterol & Lipids */}
+                <div className="p-4 rounded-xl border border-[#DCE5EC] bg-[#F7F9FB] flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-[#071B49] block">Lipid Panel</span>
+                    <span className="text-[11px] text-[#64748B]">Total cholesterol, HDL, LDL, Triglycerides</span>
+                  </div>
+                  <div className="inline-flex rounded-lg p-1 bg-white border border-[#DCE5EC] shadow-2xs">
+                    {(['mg/dL', 'mmol/L'] as const).map((unit) => (
+                      <button
+                        key={unit}
+                        type="button"
+                        onClick={() => setUnit('cholesterol', unit)}
+                        className={cn(
+                          "px-3 py-1 rounded-md text-xs font-bold transition-all",
+                          preferences.units.cholesterol === unit
+                            ? "bg-[#00A884] text-white shadow-2xs"
+                            : "text-[#64748B] hover:text-[#071B49]"
+                        )}
+                      >
+                        {unit}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Creatinine */}
+                <div className="p-4 rounded-xl border border-[#DCE5EC] bg-[#F7F9FB] flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-[#071B49] block">Serum Creatinine</span>
+                    <span className="text-[11px] text-[#64748B]">Renal clearance biomarker</span>
+                  </div>
+                  <div className="inline-flex rounded-lg p-1 bg-white border border-[#DCE5EC] shadow-2xs">
+                    {(['mg/dL', 'µmol/L'] as const).map((unit) => (
+                      <button
+                        key={unit}
+                        type="button"
+                        onClick={() => setUnit('creatinine', unit)}
+                        className={cn(
+                          "px-3 py-1 rounded-md text-xs font-bold transition-all",
+                          preferences.units.creatinine === unit
+                            ? "bg-[#00A884] text-white shadow-2xs"
+                            : "text-[#64748B] hover:text-[#071B49]"
+                        )}
+                      >
+                        {unit}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Hemoglobin */}
+                <div className="p-4 rounded-xl border border-[#DCE5EC] bg-[#F7F9FB] flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-[#071B49] block">Hemoglobin</span>
+                    <span className="text-[11px] text-[#64748B]">Complete blood count standard</span>
+                  </div>
+                  <div className="inline-flex rounded-lg p-1 bg-white border border-[#DCE5EC] shadow-2xs">
+                    {(['g/dL', 'g/L'] as const).map((unit) => (
+                      <button
+                        key={unit}
+                        type="button"
+                        onClick={() => setUnit('hemoglobin', unit)}
+                        className={cn(
+                          "px-3 py-1 rounded-md text-xs font-bold transition-all",
+                          preferences.units.hemoglobin === unit
+                            ? "bg-[#00A884] text-white shadow-2xs"
+                            : "text-[#64748B] hover:text-[#071B49]"
+                        )}
+                      >
+                        {unit}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Live Clinical Metric Preview Card */}
             <div className="p-4 rounded-xl bg-slate-50 border border-[#DCE5EC] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2.5">
@@ -1030,7 +1144,7 @@ export default function Settings() {
                   >
                     {pwLoading ? (
                       <>
-                        <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
                         <span>Updating...</span>
                       </>
                     ) : (
@@ -1082,10 +1196,7 @@ export default function Settings() {
               {/* Sessions Table / List */}
               <div className="bg-white rounded-xl border border-[#DCE5EC] overflow-hidden">
                 {sessionsLoading ? (
-                  <div className="p-8 text-center text-xs text-[#64748B]">
-                    <div className="w-5 h-5 border-2 border-[#00A884] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-                    <span>Loading active security sessions...</span>
-                  </div>
+                  <TableSkeleton rows={3} cols={3} />
                 ) : sessions.length === 0 ? (
                   <div className="p-6 text-center text-xs text-[#64748B]">
                     <Laptop className="w-6 h-6 text-slate-300 mx-auto mb-2" />
@@ -1198,7 +1309,7 @@ export default function Settings() {
                 >
                   {exportLoading ? (
                     <>
-                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
                       <span>Generating Archive...</span>
                     </>
                   ) : (

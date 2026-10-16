@@ -39,22 +39,22 @@ export class ErrorBoundary extends Component<Props, State> {
         return this.props.fallback;
       }
       return (
-        <div className="bg-white rounded-xl border border-red-100 shadow-xs flex flex-col h-full min-h-[160px] w-full">
-          <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between">
-            <h4 className="font-bold text-[#071B49] text-sm sm:text-base">{this.props.title || 'Component Error'}</h4>
+        <div className="bg-white dark:bg-[#081729] rounded-xl border border-red-100 dark:border-[#5C1D24] shadow-xs flex flex-col h-full min-h-[160px] w-full">
+          <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-[#152A42] flex items-center justify-between">
+            <h4 className="font-bold text-[#071B49] dark:text-white text-sm sm:text-base">{this.props.title || 'Component Error'}</h4>
             <button
               type="button"
               onClick={this.handleRetry}
-              className="text-xs text-[#2563EB] hover:text-[#1d4ed8] font-medium flex items-center gap-1 transition-colors"
+              className="text-xs text-[#2563EB] dark:text-[#2684FF] hover:text-[#1d4ed8] dark:hover:text-[#6BA1FF] font-medium flex items-center gap-1 transition-colors"
             >
               <RefreshCw className="w-3.5 h-3.5" />
               Retry
             </button>
           </div>
           <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-            <AlertCircle className="w-8 h-8 text-[#EF476F] mb-2 opacity-80" />
-            <p className="text-sm text-[#EF476F] font-semibold">Failed to render component</p>
-            <p className="text-xs text-[#64748B] mt-1.5 max-w-[280px] break-words" title={this.state.errorMsg}>
+            <AlertCircle className="w-8 h-8 text-[#EF476F] dark:text-[#FF5368] mb-2 opacity-80" />
+            <p className="text-sm text-[#EF476F] dark:text-[#FF5368] font-semibold">Failed to render component</p>
+            <p className="text-xs text-[#64748B] dark:text-[#8297B2] mt-1.5 max-w-[280px] break-words" title={this.state.errorMsg}>
               {this.state.errorMsg}
             </p>
           </div>
@@ -65,4 +65,6 @@ export class ErrorBoundary extends Component<Props, State> {
     return this.props.children;
   }
 }
+
+export default ErrorBoundary;
 

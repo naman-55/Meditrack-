@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { ShieldCheck, Loader2, AlertCircle, Printer } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { ShieldCheck, AlertCircle, Printer } from 'lucide-react';
 import SummaryCards from '../components/Dashboard/SummaryCards';
 import HealthRiskOverview from '../components/Dashboard/HealthRiskOverview';
 import RecentReports from '../components/Dashboard/RecentReports';
@@ -12,7 +12,6 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 
 import { reportsService } from '../api/reports';
 import { generateDashboardAnalytics } from '../analytics';
-import { useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { generatePDFReport, ReportData } from '../utils/pdfExport';
 
@@ -69,6 +68,8 @@ export default function Dashboard() {
   
   const [reportsData, setReportsData] = useState<any[]>([]);
   const [measurementsData, setMeasurementsData] = useState<any[]>([]);
+  const [risksData, setRisksData] = useState<any[]>([]);
+  const [specialtyData, setSpecialtyData] = useState<any[]>([]);
   
   
   
@@ -169,12 +170,22 @@ export default function Dashboard() {
       setLoading(true);
       setError('');
       
-      const [reports, measurements] = await Promise.all([
+      const [reports, measurements, risks, specialty] = await Promise.all([
         reportsService.getReports(),
-        reportsService.getMeasurements()
+        reportsService.getMeasurements(),
+        reportsService.getRisks().catch(err => {
+          console.error('Failed to load risk data:', err);
+          return [];
+        }),
+        reportsService.getSpecialtyGuidance().catch(err => {
+          console.error('Failed to load specialty guidance:', err);
+          return [];
+        })
       ]);
       setReportsData(reports);
       setMeasurementsData(measurements);
+      setRisksData(risks || []);
+      setSpecialtyData(specialty || []);
     } catch (err) {
       console.error('Failed to load dashboard data:', err);
       setError('Failed to load dashboard data. Please try again later.');
@@ -272,6 +283,24 @@ export default function Dashboard() {
       };
     }
     
+    // Use validated backend risks if available, otherwise fallback to localAnalytics risk evaluation
+    const resolvedRiskOverview = (risksData && risksData.length > 0)
+      ? risksData.map((r: any) => ({
+          domain: r.domain,
+          level: r.level,
+          label: r.label,
+          dataQuality: r.data_quality || r.dataQuality
+        }))
+      : localAnalytics.riskOverview;
+
+    const resolvedSpecialty = (specialtyData && specialtyData.length > 0)
+      ? {
+          available: true,
+          suggested_specialty: specialtyData[0].suggested_specialty,
+          reason: specialtyData[0].evidence
+        }
+      : undefined;
+
     return {
       summary: {
         reportsUploaded: localAnalytics.reportsCount,
@@ -280,12 +309,14 @@ export default function Dashboard() {
         dataQuality: localAnalytics.dataQuality
       },
       alerts: localAnalytics.alerts,
+      parameters: localAnalytics.parameters,
       chartData,
       bpChartData,
       hrChartData,
       spo2ChartData,
       bmiChartData,
-      riskOverview: localAnalytics.riskOverview,
+      riskOverview: resolvedRiskOverview,
+      specialtyGuidance: resolvedSpecialty,
       recentReports: localAnalytics.reports.slice(-5).map(r => ({
         id: r.id,
         name: r.reportName,
@@ -303,7 +334,7 @@ export default function Dashboard() {
         points: localAnalytics.trends[topParam].points
       } : { available: false }
     } as any;
-  }, [data, localAnalytics, selectedParam]);
+  }, [data, localAnalytics, selectedParam, risksData, specialtyData]);
 
   useEffect(() => {
     loadData();
@@ -313,29 +344,29 @@ export default function Dashboard() {
     <div id="dashboard-content" className="space-y-6">
       <div className="flex justify-between items-center mb-6">
         <div className="md:hidden print:hidden">
-          <h2 className="text-xl font-bold text-gray-900 leading-tight">Welcome back, <span className="text-emerald-700">{user?.name?.split(' ')[0]}</span> 👋</h2>
-          <p className="text-sm text-gray-500 mt-1">Here's your health overview</p>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-[#F1F5FB] leading-tight">Welcome back, <span className="text-emerald-700 dark:text-[#00D6B0]">{user?.name?.split(' ')[0]}</span> 👋</h2>
+          <p className="text-sm text-gray-500 dark:text-[#8297B2] mt-1">Here's your health overview</p>
         </div>
         <div className="hidden md:block print:block">
-           <h1 className="text-2xl font-bold text-slate-900 print:block">Health Overview Report</h1>
+           <h1 className="text-2xl font-bold text-slate-900 dark:text-[#F1F5FB] print:block">Health Overview Report</h1>
         </div>
         <button 
           data-html2canvas-ignore="true"
           onClick={handleExportPDF}
-          className="print:hidden flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg shadow-sm hover:bg-slate-50 transition-colors ml-auto"
+          className="print:hidden flex items-center gap-2 px-4 py-2 bg-white dark:bg-[#102033] border border-slate-200 dark:border-[#20364A] text-slate-700 dark:text-[#B4C4D8] rounded-xl shadow-sm hover:bg-slate-50 dark:hover:bg-[#162A3E] dark:hover:text-[#F1F5FB] transition-colors ml-auto"
         >
           <Printer className="w-4 h-4" />
-          <span className="font-medium text-sm hidden sm:inline">Export PDF</span>
+          <span className="font-semibold text-sm hidden sm:inline">Export PDF</span>
         </button>
       </div>
       
       {error && !dashboardDisplayData ? (
-        <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl flex items-center justify-between">
+        <div className="bg-red-50 dark:bg-[#2A0E14] border border-red-200 dark:border-[#801826] text-red-700 dark:text-[#FF5368] p-4 rounded-xl flex items-center justify-between">
           <div className="flex items-center gap-3">
             <AlertCircle className="w-5 h-5" />
             <p className="text-sm font-medium">{error}</p>
           </div>
-          <button onClick={loadData} className="px-3 py-1.5 bg-red-100 hover:bg-red-200 rounded text-xs font-bold transition-colors">
+          <button onClick={loadData} className="px-3 py-1.5 bg-red-100 dark:bg-[#3D141C] hover:bg-red-200 dark:hover:bg-[#4E1A24] rounded-lg text-xs font-bold transition-colors">
             Retry
           </button>
         </div>
@@ -357,7 +388,7 @@ export default function Dashboard() {
                 <select
                   value={selectedParam || ''}
                   onChange={(e) => setSelectedParam(e.target.value)}
-                  className="block w-40 rounded-md border-slate-300 py-1 pl-3 pr-8 text-sm focus:border-emerald-500 focus:outline-none focus:ring-emerald-500"
+                  className="block w-40 rounded-xl border border-slate-300 dark:border-[#20364A] bg-white dark:bg-[#102033] py-1.5 pl-3 pr-8 text-xs sm:text-sm text-slate-800 dark:text-[#F1F5FB] focus:border-[#00D6B0] focus:outline-none focus:ring-[#00D6B0]"
                 >
                   {Object.keys(localAnalytics.trends)
                     .filter(p => !['blood_pressure_systolic', 'blood_pressure_diastolic', 'heart_rate', 'spo2'].includes(p))
@@ -382,26 +413,38 @@ export default function Dashboard() {
         </ErrorBoundary>
 
         <ErrorBoundary title="Vitals Trend">
-          <div className="relative h-full flex flex-col bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden min-h-[300px]">
+          <div className="relative h-full flex flex-col bg-white dark:bg-[#0D1B2A] rounded-xl border border-slate-200 dark:border-[#20364A] shadow-sm overflow-hidden min-h-[300px] transition-colors">
             {/* Custom Modern Header for Switcher */}
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between z-10 shrink-0">
-              <h4 className="font-bold text-slate-700 capitalize">Vitals Track</h4>
-              <div className="flex bg-slate-100 p-1 rounded-lg">
+            <div className="p-4 border-b border-slate-100 dark:border-[#20364A] flex items-center justify-between z-10 shrink-0">
+              <h4 className="font-bold text-slate-700 dark:text-[#F1F5FB] capitalize">Vitals Track</h4>
+              <div className="flex bg-slate-100 dark:bg-[#102033] p-1 rounded-xl border border-transparent dark:border-[#20364A]">
                 <button
                   onClick={() => setActiveVitalTab('bp')}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all duration-200 ${activeVitalTab === 'bp' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 ${
+                    activeVitalTab === 'bp' 
+                      ? 'bg-white text-slate-800 shadow-sm dark:bg-[#00A88F] dark:text-white' 
+                      : 'text-slate-500 hover:text-slate-700 dark:text-[#8297B2] dark:hover:text-[#F1F5FB]'
+                  }`}
                 >
                   BP
                 </button>
                 <button
                   onClick={() => setActiveVitalTab('hr')}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all duration-200 ${activeVitalTab === 'hr' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 ${
+                    activeVitalTab === 'hr' 
+                      ? 'bg-white text-slate-800 shadow-sm dark:bg-[#00A88F] dark:text-white' 
+                      : 'text-slate-500 hover:text-slate-700 dark:text-[#8297B2] dark:hover:text-[#F1F5FB]'
+                  }`}
                 >
                   Heart Rate
                 </button>
                 <button
                   onClick={() => setActiveVitalTab('other')}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all duration-200 ${activeVitalTab === 'other' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 ${
+                    activeVitalTab === 'other' 
+                      ? 'bg-white text-slate-800 shadow-sm dark:bg-[#00A88F] dark:text-white' 
+                      : 'text-slate-500 hover:text-slate-700 dark:text-[#8297B2] dark:hover:text-[#F1F5FB]'
+                  }`}
                 >
                   {dashboardDisplayData?.spo2ChartData ? "SpO2" : dashboardDisplayData?.bmiChartData ? "BMI" : "Other"}
                 </button>

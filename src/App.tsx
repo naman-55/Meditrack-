@@ -42,15 +42,33 @@ const FamilyAlerts = lazy(() => import('./pages/FamilyAlerts'));
 
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SettingsProvider } from './context/SettingsContext';
+import { AlertNotificationProvider } from './context/AlertNotificationContext';
+import AlertPopupToast from './components/Alerts/AlertPopupToast';
+
+import { 
+  PageSkeleton,
+  DashboardSkeleton,
+  ReportsSkeleton,
+  TimelineSkeleton,
+  TrendsSkeleton,
+  RiskAssessmentSkeleton,
+  FutureOutlookSkeleton,
+  SpecialtyGuidanceSkeleton,
+  CareNearMeSkeleton,
+  FamilyAlertsSkeleton,
+  ProfileSkeleton,
+  SettingsSkeleton,
+  AdminTableSkeleton
+} from './components/common/Skeleton';
+import ErrorBoundary from './components/ErrorBoundary';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
   
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-3">
-        <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
-        <p className="text-sm font-medium text-slate-500">Initializing Meditrack...</p>
+      <div className="min-h-screen bg-[#F7F9FB] dark:bg-[#050D18] p-4 sm:p-6 md:p-8 max-w-7xl xl:max-w-[1520px] mx-auto">
+        <PageSkeleton />
       </div>
     );
   }
@@ -67,9 +85,8 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-3">
-        <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
-        <p className="text-sm font-medium text-slate-500">Verifying permissions...</p>
+      <div className="min-h-screen bg-[#F7F9FB] dark:bg-[#050D18] p-4 sm:p-6 md:p-8 max-w-7xl xl:max-w-[1520px] mx-auto">
+        <AdminTableSkeleton />
       </div>
     );
   }
@@ -81,47 +98,47 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-
-const PageLoader = () => (
-  <div className="flex items-center justify-center min-h-[50vh]">
-    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
-  </div>
-);
-
 export default function App() {
   return (
     <AuthProvider>
       <SettingsProvider>
-        <Router>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="/forgot-password" element={<ForgotPassword />} />
-            <Route path="/reset-password" element={<ResetPassword />} />
-            
-            <Route path="/" element={
-              <ProtectedRoute>
-                <Layout />
-              </ProtectedRoute>
-            }>
-              <Route index element={<Suspense fallback={<PageLoader />}><Dashboard /></Suspense>} />
-              <Route path="reports" element={<Suspense fallback={<PageLoader />}><Reports /></Suspense>} />
-              <Route path="timeline" element={<Suspense fallback={<PageLoader />}><Timeline /></Suspense>} />
-              <Route path="trends" element={<Suspense fallback={<PageLoader />}><Trends /></Suspense>} />
-              <Route path="risk-assessment" element={<Suspense fallback={<PageLoader />}><RiskAssessmentPage /></Suspense>} />
-              <Route path="future-outlook" element={<Suspense fallback={<PageLoader />}><FutureOutlookPage /></Suspense>} />
-              <Route path="specialty-guidance" element={<Suspense fallback={<PageLoader />}><SpecialtyGuidancePage /></Suspense>} />
-              <Route path="care-near-me" element={<Suspense fallback={<PageLoader />}><CareNearMe /></Suspense>} />
-              <Route path="family-alerts" element={<Suspense fallback={<PageLoader />}><FamilyAlerts /></Suspense>} />
-              <Route path="profile" element={<Suspense fallback={<PageLoader />}><Profile /></Suspense>} />
-              <Route path="settings" element={<Suspense fallback={<PageLoader />}><Settings /></Suspense>} />
-              <Route path="admin/users" element={<AdminRoute><Suspense fallback={<PageLoader />}><AdminUsers /></Suspense></AdminRoute>} />
-              <Route path="admin/hospitals" element={<AdminRoute><Suspense fallback={<PageLoader />}><AdminFacilities /></Suspense></AdminRoute>} />
-              <Route path="admin/specialties" element={<AdminRoute><Suspense fallback={<PageLoader />}><AdminSpecialties /></Suspense></AdminRoute>} />
-              <Route path="admin/system-logs" element={<AdminRoute><Suspense fallback={<PageLoader />}><AdminLogs /></Suspense></AdminRoute>} />
-              <Route path="admin/software-validation" element={<AdminRoute><Suspense fallback={<PageLoader />}><SoftwareValidation /></Suspense></AdminRoute>} />
-            </Route>
-          </Routes>
-        </Router>
+        <AlertNotificationProvider>
+          <Router>
+            <AlertPopupToast />
+            <ErrorBoundary title="MediTrack Application Error">
+              <Routes>
+                <Route path="/login" element={<Login />} />
+                <Route path="/forgot-password" element={<ForgotPassword />} />
+                <Route path="/reset-password" element={<ResetPassword />} />
+                
+                <Route path="/" element={
+                  <ProtectedRoute>
+                    <Layout />
+                  </ProtectedRoute>
+                }>
+                  <Route index element={<Suspense fallback={<DashboardSkeleton />}><Dashboard /></Suspense>} />
+                  <Route path="reports" element={<Suspense fallback={<ReportsSkeleton />}><Reports /></Suspense>} />
+                  <Route path="timeline" element={<Suspense fallback={<TimelineSkeleton />}><Timeline /></Suspense>} />
+                  <Route path="trends" element={<Suspense fallback={<TrendsSkeleton />}><Trends /></Suspense>} />
+                  <Route path="risk-assessment" element={<Suspense fallback={<RiskAssessmentSkeleton />}><RiskAssessmentPage /></Suspense>} />
+                  <Route path="future-outlook" element={<Suspense fallback={<FutureOutlookSkeleton />}><FutureOutlookPage /></Suspense>} />
+                  <Route path="specialty-guidance" element={<Suspense fallback={<SpecialtyGuidanceSkeleton />}><SpecialtyGuidancePage /></Suspense>} />
+                  <Route path="care-near-me" element={<Suspense fallback={<CareNearMeSkeleton />}><CareNearMe /></Suspense>} />
+                  <Route path="family-alerts" element={<Suspense fallback={<FamilyAlertsSkeleton />}><FamilyAlerts /></Suspense>} />
+                  <Route path="profile" element={<Suspense fallback={<ProfileSkeleton />}><Profile /></Suspense>} />
+                  <Route path="settings" element={<Suspense fallback={<SettingsSkeleton />}><Settings /></Suspense>} />
+                  <Route path="admin/users" element={<AdminRoute><Suspense fallback={<AdminTableSkeleton title="User Management" subtitle="View, search, and manage system users" />}><AdminUsers /></Suspense></AdminRoute>} />
+                  <Route path="admin/hospitals" element={<AdminRoute><Suspense fallback={<AdminTableSkeleton title="Hospital Facilities" subtitle="Configure and audit registered medical clinics and centers" />}><AdminFacilities /></Suspense></AdminRoute>} />
+                  <Route path="admin/specialties" element={<AdminRoute><Suspense fallback={<AdminTableSkeleton title="Clinical Specialties" subtitle="Configure doctor specialty mappings and diagnostic guidelines" />}><AdminSpecialties /></Suspense></AdminRoute>} />
+                  <Route path="admin/system-logs" element={<AdminRoute><Suspense fallback={<AdminTableSkeleton title="System Audit Logs" subtitle="Audit application security logs and system activity" />}><AdminLogs /></Suspense></AdminRoute>} />
+                  <Route path="admin/software-validation" element={<AdminRoute><Suspense fallback={<AdminTableSkeleton title="Software Validation" subtitle="Automated validation test runner and compliance reports" />}><SoftwareValidation /></Suspense></AdminRoute>} />
+                </Route>
+                {/* Fallback 404 handler: redirect any unknown routes to home */}
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </ErrorBoundary>
+          </Router>
+        </AlertNotificationProvider>
       </SettingsProvider>
     </AuthProvider>
   );

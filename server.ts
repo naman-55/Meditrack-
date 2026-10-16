@@ -21,7 +21,7 @@ import { normalizeParameterName, getParameterDisplayName } from './src/analytics
 import { convertToCanonicalUnit, CANONICAL_PARAMETERS } from './src/analytics/unitRegistry.js';
 import { specialistsRouter } from './backend/routes/specialists.routes.js';
 import { authenticateToken, requireRole, JWT_SECRET } from './backend/middleware/auth.middleware.js';
-import { authRateLimiter, uploadRateLimiter, aiRateLimiter, generalRateLimiter } from './backend/middleware/rateLimit.middleware.js';
+import { authRateLimiter, uploadRateLimiter, aiRateLimiter, chatRateLimiter, generalRateLimiter } from './backend/middleware/rateLimit.middleware.js';
 import { securityHeadersMiddleware, apiErrorHandler } from './backend/middleware/security.middleware.js';
 import { validateUploadedFile } from './backend/validators/fileUpload.validator.js';
 import { runSoftwareValidationSuite } from './backend/services/validationRunner.service.js';
@@ -29,6 +29,8 @@ import { envConfig, getEnvironmentDiagnostics } from './backend/config/env.js';
 import { authService, generateAccessToken } from './backend/services/auth.service.js';
 import { db } from './backend/db/db.js';
 import { aiService, GeminiAIError } from './backend/services/ai.service.js';
+import { generateSpecialtyGuidance, calculateHealthSnapshot } from './backend/services/specialtyGuidance.service.js';
+import { alertManager } from './backend/services/alertManager.service.js';
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
@@ -418,8 +420,63 @@ async function initDb() {
     )
   `);
 
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id)
+    )
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS medical_analysis_cache (
+      user_id INTEGER PRIMARY KEY,
+      fingerprint TEXT NOT NULL,
+      data TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id)
+    )
+  `);
+
     try { await db.execute('ALTER TABLE health_alerts ADD COLUMN is_read INTEGER DEFAULT 0'); } catch(e) {}
     try { await db.execute('ALTER TABLE health_alerts ADD COLUMN read_at TEXT'); } catch(e) {}
+    try { await db.execute('ALTER TABLE health_alerts ADD COLUMN severity TEXT DEFAULT "WARNING"'); } catch(e) {}
+    try { await db.execute('ALTER TABLE health_alerts ADD COLUMN title TEXT'); } catch(e) {}
+    try { await db.execute('ALTER TABLE health_alerts ADD COLUMN parameter TEXT'); } catch(e) {}
+    try { await db.execute('ALTER TABLE health_alerts ADD COLUMN measured_value TEXT'); } catch(e) {}
+    try { await db.execute('ALTER TABLE health_alerts ADD COLUMN reference_range TEXT'); } catch(e) {}
+    try { await db.execute('ALTER TABLE health_alerts ADD COLUMN source_report_id INTEGER'); } catch(e) {}
+    try { await db.execute('ALTER TABLE health_alerts ADD COLUMN idempotency_key TEXT'); } catch(e) {}
+    try { await db.execute('ALTER TABLE health_alerts ADD COLUMN action_url TEXT'); } catch(e) {}
+    try { await db.execute('ALTER TABLE health_alerts ADD COLUMN details_json TEXT'); } catch(e) {}
+
+    // Trusted Contacts Schema Extensions (Phase 4)
+    try { await db.execute('ALTER TABLE trusted_contacts ADD COLUMN email TEXT'); } catch(e) {}
+    try { await db.execute('ALTER TABLE trusted_contacts ADD COLUMN phone TEXT'); } catch(e) {}
+    try { await db.execute('ALTER TABLE trusted_contacts ADD COLUMN is_emergency INTEGER DEFAULT 1'); } catch(e) {}
+    try { await db.execute('ALTER TABLE trusted_contacts ADD COLUMN consent_email INTEGER DEFAULT 1'); } catch(e) {}
+    try { await db.execute('ALTER TABLE trusted_contacts ADD COLUMN consent_sms INTEGER DEFAULT 1'); } catch(e) {}
+
+    // Notification Deliveries Audit Table (Phase 9)
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS notification_deliveries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        alert_id INTEGER,
+        channel TEXT NOT NULL,
+        recipient TEXT NOT NULL,
+        provider_message_id TEXT,
+        delivery_status TEXT NOT NULL,
+        attempt_count INTEGER DEFAULT 0,
+        error_message TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(alert_id) REFERENCES health_alerts(id) ON DELETE CASCADE
+      )
+    `);
 
     // Future Outlook Schema Extensions (Phase 6)
     try { await db.execute('ALTER TABLE future_outlook ADD COLUMN status TEXT'); } catch(e) {}
@@ -459,7 +516,12 @@ async function initDb() {
       'CREATE INDEX IF NOT EXISTS idx_trusted_contacts_user ON trusted_contacts(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_alerts_user ON health_alerts(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_meds_user ON medications(user_id)',
-      'CREATE INDEX IF NOT EXISTS idx_habits_user ON habits(user_id)'
+      'CREATE INDEX IF NOT EXISTS idx_habits_user ON habits(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_chat_messages_user ON chat_messages(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_analysis_cache_user ON medical_analysis_cache(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_deliveries_alert ON notification_deliveries(alert_id)',
+      'CREATE INDEX IF NOT EXISTS idx_deliveries_status ON notification_deliveries(delivery_status)',
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_alerts_idempotency ON health_alerts(idempotency_key)'
     ];
 
     for (const stmt of indexStatements) {
@@ -1510,6 +1572,14 @@ app.delete('/api/reports/:id', authenticateToken, async (req: any, res) => {
       args: [reportId]
     });
 
+    // Invalidate cached medical analysis for user
+    try {
+      await db.execute({
+        sql: 'DELETE FROM medical_analysis_cache WHERE user_id = ?',
+        args: [userId]
+      });
+    } catch (cacheErr) {}
+
     // Attempt to delete the physical file
     if (filePath && fs.existsSync(filePath)) {
       try {
@@ -1643,6 +1713,27 @@ app.post('/api/reports/upload', authenticateToken, uploadRateLimiter, upload.sin
       args: [report.id]
     });
     report.processing_status = 'COMPLETED';
+
+    // Invalidate analysis cache and refresh specialty guidance for newly processed report
+    try {
+      await db.execute({
+        sql: 'DELETE FROM medical_analysis_cache WHERE user_id = ?',
+        args: [req.user.id]
+      });
+      await generateSpecialtyGuidance(req.user.id);
+      await executeRiskAssessmentForUser(req.user.id);
+      await executeFutureOutlookForUser(req.user.id);
+    } catch (cacheErr) {
+      console.warn('Failed to invalidate/refresh medical analysis cache:', cacheErr);
+    }
+
+    // Real-Time Health Risk Alert & Emergency Pipeline Evaluation (Phase 7)
+    try {
+      const generatedAlerts = await alertManager.processReportAlerts(req.user.id, report.id as number);
+      console.log(`[AlertManager] Evaluated report #${report.id}: Generated ${generatedAlerts.length} alert(s).`);
+    } catch (alertErr) {
+      console.error('[AlertManager] Failed to evaluate report alerts:', alertErr);
+    }
 
   } catch (error: any) {
     fs.writeFileSync("ocr_error.log", error.message || String(error));
@@ -2071,365 +2162,344 @@ app.get('/api/trends/chart/:parameter', authenticateToken, async (req: any, res)
   res.json(chartData);
 });
 
-// --- RISK ASSESSMENT ROUTES ---
-app.post('/api/risk/analyze', authenticateToken, aiRateLimiter, async (req: any, res) => {
-  // Get all measurements for the user
+// --- RISK ASSESSMENT CORE EXECUTOR & ROUTES ---
+async function executeRiskAssessmentForUser(userId: number) {
   const result = await db.execute({
-    sql: `SELECT m.parameter, m.normalized_value, m.validation_status, m.source_page as page, r.report_date, r.filename as report 
+    sql: `SELECT m.id, m.parameter, m.raw_value, m.normalized_value, m.unit, m.normalized_unit,
+                 m.validation_status, m.source_page as page, r.report_date, r.filename as report 
           FROM measurements m 
           JOIN medical_reports r ON m.report_id = r.id 
           WHERE r.user_id = ? 
-          ORDER BY r.report_date DESC`,
-    args: [req.user.id]
+          ORDER BY r.report_date ASC, m.id ASC`,
+    args: [userId]
   });
 
   const measurements = result.rows as unknown as MeasurementRecord[];
-
-  // Run the explicit risk rules engine
   const riskResults = evaluateRiskAllDomains(measurements);
-
   const now = new Date().toISOString();
 
   // Clear previous risk assessments
   await db.execute({
     sql: 'DELETE FROM risk_assessment WHERE user_id = ?',
-    args: [req.user.id]
+    args: [userId]
   });
 
   const assessmentsCreated = [];
-
   for (const risk of riskResults) {
     const insertResult = await db.execute({
       sql: `INSERT INTO risk_assessment (user_id, domain, level, label, evidence, data_quality, rule_version, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-      args: [req.user.id, risk.domain, risk.level, risk.label, risk.evidence, risk.data_quality, risk.rule_version, now]
+      args: [userId, risk.domain, risk.level, risk.label, risk.evidence, risk.data_quality, risk.rule_version, now]
     });
     assessmentsCreated.push(insertResult.rows[0]);
   }
+  return assessmentsCreated;
+}
 
-  res.json({ message: 'Risk assessment complete', risks: assessmentsCreated });
+app.post('/api/risk/analyze', authenticateToken, aiRateLimiter, async (req: any, res) => {
+  try {
+    const assessments = await executeRiskAssessmentForUser(req.user.id);
+    res.json({ message: 'Risk assessment complete', risks: assessments });
+  } catch (err: any) {
+    console.error('Risk assessment execution error:', err);
+    res.status(500).json({ error: 'Failed to execute clinical risk assessment' });
+  }
 });
 
 app.get('/api/risk', authenticateToken, async (req: any, res) => {
-  const result = await db.execute({
-    sql: 'SELECT * FROM risk_assessment WHERE user_id = ? ORDER BY created_at DESC',
-    args: [req.user.id]
-  });
-  res.json(result.rows);
-});
-
-// Add basic health endpoint
-
-// --- DASHBOARD ROUTE (PHASE 16 / DASHBOARD FIX) ---
-
-
-// --- OUTLOOK ROUTES (PHASE 2 & 6: ROBUST FORECASTING ENGINE) ---
-app.post('/api/outlook/analyze', authenticateToken, aiRateLimiter, async (req: any, res) => {
   try {
-    const userId = req.user.id;
-
-    // 1. Retrieve all measurements strictly owned by the authenticated user and joined to verified reports
-    const rawResult = await db.execute({
-      sql: `SELECT m.id, m.report_id, m.parameter, m.raw_value, m.normalized_value, 
-                   m.unit, m.normalized_unit, m.validation_status, r.report_date 
-            FROM measurements m 
-            JOIN medical_reports r ON m.report_id = r.id 
-            WHERE r.user_id = ? 
-            ORDER BY r.report_date ASC, m.id ASC`,
-      args: [userId]
+    let result = await db.execute({
+      sql: 'SELECT * FROM risk_assessment WHERE user_id = ? ORDER BY created_at DESC',
+      args: [req.user.id]
     });
 
-    const observationsByParam = new Map<string, ValidatedObservation[]>();
-    const exclusionsByParam = new Map<string, ExcludedObservation[]>();
-
-    const addObservation = (param: string, obs: ValidatedObservation) => {
-      if (!observationsByParam.has(param)) observationsByParam.set(param, []);
-      observationsByParam.get(param)!.push(obs);
-    };
-
-    const addExclusion = (param: string, excl: ExcludedObservation) => {
-      if (!exclusionsByParam.has(param)) exclusionsByParam.set(param, []);
-      exclusionsByParam.get(param)!.push(excl);
-    };
-
-    for (const row of rawResult.rows) {
-      const rawParam = String(row.parameter || '').trim();
-      const rawVal = row.raw_value;
-      const normVal = row.normalized_value;
-      const rawUnit = String(row.unit || row.normalized_unit || '');
-      const status = row.validation_status;
-      const dateStr = String(row.report_date || '');
-      const reportId = Number(row.report_id);
-
-      // Rule: Accept only VALIDATED measurements
-      if (status !== 'VALIDATED') {
-        const canonical = normalizeParameterName(rawParam);
-        addExclusion(canonical, {
-          parameter: rawParam,
-          rawReportId: reportId,
-          date: dateStr,
-          rawValue: rawVal,
-          rawUnit,
-          reason: `Measurement not validated (status: ${status || 'UNVALIDATED'})`
+    // Auto-compute if table is empty but validated measurements exist in reports
+    if (result.rows.length === 0) {
+      const countCheck = await db.execute({
+        sql: `SELECT count(*) as count FROM measurements m JOIN medical_reports r ON m.report_id = r.id WHERE r.user_id = ?`,
+        args: [req.user.id]
+      });
+      if (Number(countCheck.rows[0]?.count || 0) > 0) {
+        await executeRiskAssessmentForUser(req.user.id);
+        result = await db.execute({
+          sql: 'SELECT * FROM risk_assessment WHERE user_id = ? ORDER BY created_at DESC',
+          args: [req.user.id]
         });
-        continue;
       }
+    }
 
-      // Rule: Date validation
-      if (!dateStr || isNaN(new Date(dateStr).getTime())) {
-        const canonical = normalizeParameterName(rawParam);
-        addExclusion(canonical, {
-          parameter: rawParam,
-          rawReportId: reportId,
-          date: dateStr,
-          rawValue: rawVal,
-          rawUnit,
-          reason: 'Invalid or missing measurement timestamp'
-        });
-        continue;
-      }
+    res.json(result.rows);
+  } catch (err: any) {
+    console.error('Fetch risk assessment error:', err);
+    res.status(500).json({ error: 'Failed to retrieve risk assessments.' });
+  }
+});
 
-      const timestamp = new Date(dateStr).getTime();
-      const canonicalParam = normalizeParameterName(rawParam);
+// --- OUTLOOK CORE EXECUTOR & ROUTES ---
+async function executeFutureOutlookForUser(userId: number) {
+  const rawResult = await db.execute({
+    sql: `SELECT m.id, m.report_id, m.parameter, m.raw_value, m.normalized_value, 
+                 m.unit, m.normalized_unit, m.validation_status, r.report_date 
+          FROM measurements m 
+          JOIN medical_reports r ON m.report_id = r.id 
+          WHERE r.user_id = ? 
+          ORDER BY r.report_date ASC, m.id ASC`,
+    args: [userId]
+  });
 
-      // Rule: Special handling for blood pressure (must split into Systolic & Diastolic)
-      const valString = String(normVal || rawVal || '').trim();
-      const isBpParameter = canonicalParam === 'blood_pressure' || 
-                            canonicalParam === 'blood_pressure_systolic' || 
-                            canonicalParam === 'blood_pressure_diastolic' ||
-                            rawParam.toLowerCase().includes('blood pressure') ||
-                            valString.includes('/');
+  const observationsByParam = new Map<string, ValidatedObservation[]>();
+  const exclusionsByParam = new Map<string, ExcludedObservation[]>();
 
-      if (isBpParameter && valString.includes('/')) {
-        const parts = valString.split('/');
-        if (parts.length >= 2) {
-          const sysMatch = parts[0].trim().match(/\d+(\.\d+)?/);
-          const diaMatch = parts[1].trim().match(/\d+(\.\d+)?/);
+  const addObservation = (param: string, obs: ValidatedObservation) => {
+    if (!observationsByParam.has(param)) observationsByParam.set(param, []);
+    observationsByParam.get(param)!.push(obs);
+  };
 
-          if (sysMatch && diaMatch) {
-            const sysNum = parseFloat(sysMatch[0]);
-            const diaNum = parseFloat(diaMatch[0]);
+  const addExclusion = (param: string, excl: ExcludedObservation) => {
+    if (!exclusionsByParam.has(param)) exclusionsByParam.set(param, []);
+    exclusionsByParam.get(param)!.push(excl);
+  };
 
-            if (isFinite(sysNum) && sysNum > 30 && sysNum < 300) {
-              addObservation('blood_pressure_systolic', {
-                value: sysNum,
-                date: dateStr,
-                timestamp,
-                rawReportId: reportId,
-                originalValue: parts[0].trim(),
-                originalUnit: rawUnit || 'mmHg',
-                canonicalUnit: 'mmHg'
-              });
-            } else {
-              addExclusion('blood_pressure_systolic', {
-                parameter: 'Systolic Blood Pressure',
-                rawReportId: reportId,
-                date: dateStr,
-                rawValue: parts[0],
-                rawUnit,
-                reason: 'Systolic value out of plausible physiological range'
-              });
-            }
+  for (const row of rawResult.rows) {
+    const rawParam = String(row.parameter || '').trim();
+    const rawVal = row.raw_value;
+    const normVal = row.normalized_value;
+    const rawUnit = String(row.unit || row.normalized_unit || '');
+    const status = row.validation_status;
+    const dateStr = String(row.report_date || '');
+    const reportId = Number(row.report_id);
 
-            if (isFinite(diaNum) && diaNum > 20 && diaNum < 200) {
-              addObservation('blood_pressure_diastolic', {
-                value: diaNum,
-                date: dateStr,
-                timestamp,
-                rawReportId: reportId,
-                originalValue: parts[1].trim(),
-                originalUnit: rawUnit || 'mmHg',
-                canonicalUnit: 'mmHg'
-              });
-            } else {
-              addExclusion('blood_pressure_diastolic', {
-                parameter: 'Diastolic Blood Pressure',
-                rawReportId: reportId,
-                date: dateStr,
-                rawValue: parts[1],
-                rawUnit,
-                reason: 'Diastolic value out of plausible physiological range'
-              });
-            }
-          } else {
-            addExclusion('blood_pressure', {
-              parameter: rawParam,
-              rawReportId: reportId,
+    // Rule: Exclude only explicitly rejected measurements
+    if (status === 'REJECTED') {
+      const canonical = normalizeParameterName(rawParam);
+      addExclusion(canonical, {
+        parameter: rawParam,
+        rawReportId: reportId,
+        date: dateStr,
+        rawValue: rawVal,
+        rawUnit,
+        reason: 'Measurement marked as rejected'
+      });
+      continue;
+    }
+
+    if (!dateStr || isNaN(new Date(dateStr).getTime())) {
+      const canonical = normalizeParameterName(rawParam);
+      addExclusion(canonical, {
+        parameter: rawParam,
+        rawReportId: reportId,
+        date: dateStr,
+        rawValue: rawVal,
+        rawUnit,
+        reason: 'Invalid or missing measurement timestamp'
+      });
+      continue;
+    }
+
+    const timestamp = new Date(dateStr).getTime();
+    const canonicalParam = normalizeParameterName(rawParam);
+
+    const valString = String(normVal || rawVal || '').trim();
+    const isBpParameter = canonicalParam === 'blood_pressure' || 
+                          canonicalParam === 'blood_pressure_systolic' || 
+                          canonicalParam === 'blood_pressure_diastolic' ||
+                          rawParam.toLowerCase().includes('blood pressure') ||
+                          valString.includes('/');
+
+    if (isBpParameter && valString.includes('/')) {
+      const parts = valString.split('/');
+      if (parts.length >= 2) {
+        const sysMatch = parts[0].trim().match(/\d+(\.\d+)?/);
+        const diaMatch = parts[1].trim().match(/\d+(\.\d+)?/);
+
+        if (sysMatch && diaMatch) {
+          const sysNum = parseFloat(sysMatch[0]);
+          const diaNum = parseFloat(diaMatch[0]);
+
+          if (isFinite(sysNum) && sysNum > 30 && sysNum < 300) {
+            addObservation('blood_pressure_systolic', {
+              value: sysNum,
               date: dateStr,
-              rawValue: valString,
-              rawUnit,
-              reason: 'Malformed blood pressure format (expected SYS/DIA)'
+              timestamp,
+              rawReportId: reportId,
+              originalValue: parts[0].trim(),
+              originalUnit: rawUnit || 'mmHg',
+              canonicalUnit: 'mmHg'
+            });
+          }
+          if (isFinite(diaNum) && diaNum > 20 && diaNum < 200) {
+            addObservation('blood_pressure_diastolic', {
+              value: diaNum,
+              date: dateStr,
+              timestamp,
+              rawReportId: reportId,
+              originalValue: parts[1].trim(),
+              originalUnit: rawUnit || 'mmHg',
+              canonicalUnit: 'mmHg'
             });
           }
         }
-        continue;
       }
+      continue;
+    }
 
-      // Standard biomarker numeric extraction
-      // Use normalized_value first if clean numeric, else raw_value
-      const cleanStr = String(normVal || rawVal || '').replace(/,/g, '');
-      const numMatch = cleanStr.match(/-?\d+(\.\d+)?/);
+    const cleanStr = String(normVal || rawVal || '').replace(/,/g, '');
+    const numMatch = cleanStr.match(/-?\d+(\.\d+)?/);
 
-      if (!numMatch) {
-        addExclusion(canonicalParam, {
-          parameter: rawParam,
-          rawReportId: reportId,
-          date: dateStr,
-          rawValue: valString,
-          rawUnit,
-          reason: 'No finite numeric measurement extractable'
-        });
-        continue;
-      }
-
-      const numVal = parseFloat(numMatch[0]);
-      if (!isFinite(numVal)) {
-        addExclusion(canonicalParam, {
-          parameter: rawParam,
-          rawReportId: reportId,
-          date: dateStr,
-          rawValue: valString,
-          rawUnit,
-          reason: 'Non-finite numeric value'
-        });
-        continue;
-      }
-
-      // Unit harmonization via centralized clinical unit conversion registry
-      const conversion = convertToCanonicalUnit(canonicalParam, numVal, rawUnit);
-      if (!conversion.success || conversion.convertedValue === null) {
-        addExclusion(canonicalParam, {
-          parameter: rawParam,
-          rawReportId: reportId,
-          date: dateStr,
-          rawValue: numVal,
-          rawUnit,
-          reason: conversion.error || `Unsupported unit '${rawUnit}'`
-        });
-        continue;
-      }
-
-      addObservation(canonicalParam, {
-        value: conversion.convertedValue,
-        date: dateStr,
-        timestamp,
+    if (!numMatch) {
+      addExclusion(canonicalParam, {
+        parameter: rawParam,
         rawReportId: reportId,
-        originalValue: numVal,
-        originalUnit: rawUnit,
-        canonicalUnit: conversion.canonicalUnit
+        date: dateStr,
+        rawValue: valString,
+        rawUnit,
+        reason: 'No finite numeric measurement extractable'
       });
+      continue;
     }
 
-    // Include all standard registry clinical parameters so none are silently missing
-    const standardParams = [
-      'hemoglobin',
-      'fasting_glucose',
-      'total_cholesterol',
-      'ldl',
-      'hdl',
-      'triglycerides',
-      'creatinine',
-      'alt',
-      'ast',
-      'hematocrit',
-      'platelets',
-      'wbc',
-      'rbc',
-      'blood_pressure_systolic',
-      'blood_pressure_diastolic'
-    ];
+    const numVal = parseFloat(numMatch[0]);
+    if (!isFinite(numVal)) continue;
 
-    const allParams = new Set([...standardParams, ...observationsByParam.keys()]);
+    // Unit harmonization via centralized clinical unit conversion registry
+    const conversion = convertToCanonicalUnit(canonicalParam, numVal, rawUnit);
+    if (!conversion.success || conversion.convertedValue === null) {
+      addExclusion(canonicalParam, {
+        parameter: rawParam,
+        rawReportId: reportId,
+        date: dateStr,
+        rawValue: numVal,
+        rawUnit,
+        reason: conversion.error || `Unsupported unit '${rawUnit}'`
+      });
+      continue;
+    }
 
-    const engine = new RobustForecastingEngine();
-    const runId = `run-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-    const now = new Date().toISOString();
-    const computedForecasts = [];
+    addObservation(canonicalParam, {
+      value: conversion.convertedValue,
+      date: dateStr,
+      timestamp,
+      rawReportId: reportId,
+      originalValue: numVal,
+      originalUnit: rawUnit,
+      canonicalUnit: conversion.canonicalUnit
+    });
+  }
 
-    for (const param of allParams) {
-      const obs = observationsByParam.get(param) || [];
-      const excl = exclusionsByParam.get(param) || [];
+  // Include standard registry clinical parameters
+  const standardParams = [
+    'hemoglobin',
+    'fasting_glucose',
+    'total_cholesterol',
+    'ldl',
+    'hdl',
+    'triglycerides',
+    'creatinine',
+    'alt',
+    'ast',
+    'hematocrit',
+    'platelets',
+    'wbc',
+    'rbc',
+    'blood_pressure_systolic',
+    'blood_pressure_diastolic'
+  ];
 
-      // Deduplicate only genuine identical records (same date and same value)
-      const dedupedObs: ValidatedObservation[] = [];
-      const seenKey = new Set<string>();
-      for (const o of obs) {
-        const k = `${o.date}-${o.value}-${o.canonicalUnit}`;
-        if (!seenKey.has(k)) {
-          seenKey.add(k);
-          dedupedObs.push(o);
-        }
+  const allParams = new Set([...standardParams, ...observationsByParam.keys()]);
+  const engine = new RobustForecastingEngine();
+  const runId = `run-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const now = new Date().toISOString();
+  const computedForecasts = [];
+
+  for (const param of allParams) {
+    const obs = observationsByParam.get(param) || [];
+    const excl = exclusionsByParam.get(param) || [];
+
+    // Deduplicate only genuine identical records (same date, value, unit)
+    const dedupedObs: ValidatedObservation[] = [];
+    const seenKey = new Set<string>();
+    for (const o of obs) {
+      const k = `${o.date}-${o.value}-${o.canonicalUnit}`;
+      if (!seenKey.has(k)) {
+        seenKey.add(k);
+        dedupedObs.push(o);
       }
-
-      const forecast = engine.forecast({
-        parameter: param,
-        observations: dedupedObs,
-        excludedRecords: excl,
-        forecastHorizonDays: 90
-      });
-
-      computedForecasts.push(forecast);
     }
 
-    // Atomic persistence: Clear existing records for this user and insert new validated run
+    const forecast = engine.forecast({
+      parameter: param,
+      observations: dedupedObs,
+      excludedRecords: excl,
+      forecastHorizonDays: 90
+    });
+
+    computedForecasts.push(forecast);
+  }
+
+  // Clear existing records for this user and insert new run
+  await db.execute({
+    sql: 'DELETE FROM future_outlook WHERE user_id = ?',
+    args: [userId]
+  });
+
+  for (const f of computedForecasts) {
     await db.execute({
-      sql: 'DELETE FROM future_outlook WHERE user_id = ?',
-      args: [userId]
+      sql: `INSERT INTO future_outlook (
+              user_id, parameter, forecast_direction, forecast_range, confidence_category, 
+              limitations, model_version, input_data_version, data_quality, created_at,
+              status, display_name, canonical_unit, observation_count, distinct_dates_count,
+              history_duration_days, last_observed_value, last_observed_date, forecast_target_date,
+              forecast_value, prediction_interval_json, backtest_metrics_json, reason_code,
+              reason_message, excluded_count, history_json, run_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        userId,
+        f.parameter,
+        f.trendDirection,
+        f.forecastRange,
+        f.confidenceCategory,
+        f.limitations,
+        f.modelVersion,
+        f.inputDataFingerprint,
+        f.dataQuality,
+        now,
+        f.status,
+        f.displayName,
+        f.canonicalUnit,
+        f.observationCount,
+        f.distinctDatesCount,
+        f.historyDurationDays,
+        f.lastObservedValue,
+        f.lastObservedDate,
+        f.forecastTargetDate,
+        f.forecastValue,
+        f.predictionInterval ? JSON.stringify(f.predictionInterval) : null,
+        f.backtestMetrics ? JSON.stringify(f.backtestMetrics) : null,
+        f.reasonCode,
+        f.reasonMessage,
+        f.excludedCount,
+        JSON.stringify(f.history),
+        runId
+      ]
     });
+  }
 
-    for (const f of computedForecasts) {
-      await db.execute({
-        sql: `INSERT INTO future_outlook (
-                user_id, parameter, forecast_direction, forecast_range, confidence_category, 
-                limitations, model_version, input_data_version, data_quality, created_at,
-                status, display_name, canonical_unit, observation_count, distinct_dates_count,
-                history_duration_days, last_observed_value, last_observed_date, forecast_target_date,
-                forecast_value, prediction_interval_json, backtest_metrics_json, reason_code,
-                reason_message, excluded_count, history_json, run_id
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        args: [
-          userId,
-          f.parameter,
-          f.trendDirection,
-          f.forecastRange,
-          f.confidenceCategory,
-          f.limitations,
-          f.modelVersion,
-          f.inputDataFingerprint,
-          f.dataQuality,
-          now,
-          f.status,
-          f.displayName,
-          f.canonicalUnit,
-          f.observationCount,
-          f.distinctDatesCount,
-          f.historyDurationDays,
-          f.lastObservedValue,
-          f.lastObservedDate,
-          f.forecastTargetDate,
-          f.forecastValue,
-          f.predictionInterval ? JSON.stringify(f.predictionInterval) : null,
-          f.backtestMetrics ? JSON.stringify(f.backtestMetrics) : null,
-          f.reasonCode,
-          f.reasonMessage,
-          f.excludedCount,
-          JSON.stringify(f.history),
-          runId
-        ]
-      });
-    }
+  const persisted = await db.execute({
+    sql: 'SELECT * FROM future_outlook WHERE user_id = ? ORDER BY display_name ASC',
+    args: [userId]
+  });
 
-    // Retrieve fresh persisted records
-    const persisted = await db.execute({
-      sql: 'SELECT * FROM future_outlook WHERE user_id = ? ORDER BY display_name ASC',
-      args: [userId]
-    });
+  return { runId, now, forecasts: persisted.rows };
+}
 
+app.post('/api/outlook/analyze', authenticateToken, aiRateLimiter, async (req: any, res) => {
+  try {
+    const outlookResult = await executeFutureOutlookForUser(req.user.id);
     res.json({
       message: 'Future Outlook analysis completed successfully',
-      run_id: runId,
-      timestamp: now,
-      forecasts: persisted.rows
+      run_id: outlookResult.runId,
+      timestamp: outlookResult.now,
+      forecasts: outlookResult.forecasts
     });
   } catch (err: any) {
     console.error('Future Outlook analysis error:', err);
@@ -2439,10 +2509,23 @@ app.post('/api/outlook/analyze', authenticateToken, aiRateLimiter, async (req: a
 
 app.get('/api/outlook', authenticateToken, async (req: any, res) => {
   try {
-    const result = await db.execute({
+    let result = await db.execute({
       sql: 'SELECT * FROM future_outlook WHERE user_id = ? ORDER BY display_name ASC, parameter ASC',
       args: [req.user.id]
     });
+
+    // Auto-compute if table is empty but validated measurements exist in reports
+    if (result.rows.length === 0) {
+      const countCheck = await db.execute({
+        sql: `SELECT count(*) as count FROM measurements m JOIN medical_reports r ON m.report_id = r.id WHERE r.user_id = ?`,
+        args: [req.user.id]
+      });
+      if (Number(countCheck.rows[0]?.count || 0) > 0) {
+        const generated = await executeFutureOutlookForUser(req.user.id);
+        result = { rows: generated.forecasts } as any;
+      }
+    }
+
     res.json(result.rows);
   } catch (err: any) {
     console.error('Future Outlook fetch error:', err);
@@ -2452,54 +2535,643 @@ app.get('/api/outlook', authenticateToken, async (req: any, res) => {
 
 // --- SPECIALTY GUIDANCE ROUTES ---
 app.post('/api/specialty/analyze', authenticateToken, aiRateLimiter, async (req: any, res) => {
-  // Get active risks that are elevated
-  const riskResult = await db.execute({
-    sql: `SELECT domain, level, label FROM risk_assessment 
-          WHERE user_id = ? AND level IN ('YELLOW', 'ORANGE', 'RED')`,
-    args: [req.user.id]
-  });
-
-  const now = new Date().toISOString();
-
-  // Clear previous
-  await db.execute({
-    sql: 'DELETE FROM specialty_guidance WHERE user_id = ?',
-    args: [req.user.id]
-  });
-
-  const guidances = [];
-
-  for (const risk of riskResult.rows) {
-    const domain = risk.domain as string;
-    
-    // Find matching specialty rule
-    const ruleResult = await db.execute({
-      sql: 'SELECT specialty, rule_reference, version FROM specialty_rules WHERE domain = ? AND active = 1',
-      args: [domain.toLowerCase()]
-    });
-
-    if (ruleResult.rows.length > 0) {
-      const rule = ruleResult.rows[0];
-      const evidenceStr = `Triggered by ${risk.level} risk in ${domain} domain (${risk.label}). Ref: ${rule.rule_reference}`;
-      
-      const insertResult = await db.execute({
-        sql: `INSERT INTO specialty_guidance (user_id, domain, suggested_specialty, evidence, rule_version, created_at)
-              VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
-        args: [req.user.id, domain, rule.specialty, evidenceStr, rule.version, now]
-      });
-      guidances.push(insertResult.rows[0]);
-    }
+  try {
+    const guidances = await generateSpecialtyGuidance(req.user.id);
+    const snapshot = await calculateHealthSnapshot(req.user.id);
+    res.json({ message: 'Specialty analysis complete', guidances, snapshot });
+  } catch (error: any) {
+    console.error('Error analyzing specialty guidance:', error);
+    res.status(500).json({ error: error.message || 'Failed to analyze specialty guidance' });
   }
+});
 
-  res.json({ message: 'Specialty analysis complete', guidances });
+app.get('/api/specialty/snapshot', authenticateToken, async (req: any, res) => {
+  try {
+    const snapshot = await calculateHealthSnapshot(req.user.id);
+    res.json(snapshot);
+  } catch (error: any) {
+    console.error('Error calculating health snapshot:', error);
+    res.status(500).json({ error: error.message || 'Failed to calculate snapshot' });
+  }
 });
 
 app.get('/api/specialty', authenticateToken, async (req: any, res) => {
-  const result = await db.execute({
-    sql: 'SELECT * FROM specialty_guidance WHERE user_id = ? ORDER BY created_at DESC',
-    args: [req.user.id]
+  try {
+    let result = await db.execute({
+      sql: 'SELECT * FROM specialty_guidance WHERE user_id = ? ORDER BY created_at DESC',
+      args: [req.user.id]
+    });
+
+    if (result.rows.length === 0) {
+      const generated = await generateSpecialtyGuidance(req.user.id);
+      return res.json(generated);
+    }
+
+    res.json(result.rows);
+  } catch (error: any) {
+    console.error('Error fetching specialty guidance:', error);
+    res.status(500).json({ error: error.message || 'Failed to retrieve specialty guidance' });
+  }
+});
+
+// --- AI ASSISTANT CONTEXT, CACHE & CHAT PIPELINE ---
+
+interface MedicalContextData {
+  user: any;
+  reports: any[];
+  pendingReports: any[];
+  measurements: any[];
+  risks: any[];
+  guidances: any[];
+  outlooks: any[];
+  hasData: boolean;
+}
+
+async function getUserMedicalAnalysisContext(userId: number): Promise<{ contextData: MedicalContextData; fromCache: boolean; fingerprint: string }> {
+  try {
+    // 1. Compute deterministic medical data fingerprint from completed reports and validated measurements
+    let reportsMetaRes: any = { rows: [] };
+    let measMetaRes: any = { rows: [{ count: 0, max_id: 0 }] };
+    try {
+      [reportsMetaRes, measMetaRes] = await Promise.all([
+        db.execute({
+          sql: `SELECT id, filename, report_date, updated_at, processing_status, file_hash 
+                FROM medical_reports WHERE user_id = ? ORDER BY id ASC`,
+          args: [userId]
+        }),
+        db.execute({
+          sql: `SELECT count(*) as count, max(m.id) as max_id 
+                FROM measurements m 
+                JOIN medical_reports r ON m.report_id = r.id 
+                WHERE r.user_id = ?`,
+          args: [userId]
+        })
+      ]);
+    } catch (metaErr) {
+      console.warn('[AI Context] Metadata query warning:', metaErr);
+    }
+
+    const rawFingerprint = reportsMetaRes.rows.map((r: any) => `${r.id}:${r.updated_at}:${r.processing_status}:${r.file_hash}`).join('|')
+      + `_m:${measMetaRes.rows[0]?.count || 0}_max:${measMetaRes.rows[0]?.max_id || 0}`;
+    const currentFingerprint = crypto.createHash('sha256').update(rawFingerprint).digest('hex');
+
+    // 2. Check persistent analysis cache
+    try {
+      const cacheRes = await db.execute({
+        sql: 'SELECT fingerprint, data FROM medical_analysis_cache WHERE user_id = ?',
+        args: [userId]
+      });
+      if (cacheRes.rows.length > 0 && cacheRes.rows[0].fingerprint === currentFingerprint) {
+        const parsed = JSON.parse(cacheRes.rows[0].data as string);
+        return { contextData: parsed, fromCache: true, fingerprint: currentFingerprint };
+      }
+    } catch (err) {
+      console.warn('[AI Cache] Error reading cache, rebuilding context:', err);
+    }
+
+    // 3. Cache miss or invalidated: Retrieve authorized clinical records safely
+    let userRes: any = { rows: [] };
+    let completedReportsRes: any = { rows: [] };
+    let pendingReportsRes: any = { rows: [] };
+    let measurementsRes: any = { rows: [] };
+    let risksRes: any = { rows: [] };
+    let guidanceRes: any = { rows: [] };
+    let outlookRes: any = { rows: [] };
+
+    try {
+      userRes = await db.execute({
+        sql: 'SELECT id, name, email, date_of_birth, gender FROM users WHERE id = ?',
+        args: [userId]
+      });
+    } catch (e) {
+      console.warn('[AI Context] User query error:', e);
+    }
+
+    try {
+      completedReportsRes = await db.execute({
+        sql: `SELECT id, filename, report_type, report_date, upload_date 
+              FROM medical_reports 
+              WHERE user_id = ? AND processing_status = 'COMPLETED' 
+              ORDER BY report_date DESC, id DESC`,
+        args: [userId]
+      });
+    } catch (e) {
+      console.warn('[AI Context] Completed reports query error:', e);
+    }
+
+    try {
+      pendingReportsRes = await db.execute({
+        sql: `SELECT id, filename, processing_status 
+              FROM medical_reports 
+              WHERE user_id = ? AND processing_status != 'COMPLETED' 
+              ORDER BY id DESC`,
+        args: [userId]
+      });
+    } catch (e) {
+      console.warn('[AI Context] Pending reports query error:', e);
+    }
+
+    try {
+      measurementsRes = await db.execute({
+        sql: `SELECT m.parameter, m.raw_value, m.normalized_value, m.unit, m.normalized_unit, r.report_date, r.filename, m.source_page, m.validation_status
+              FROM measurements m
+              JOIN medical_reports r ON m.report_id = r.id
+              WHERE r.user_id = ? AND r.processing_status = 'COMPLETED'
+              ORDER BY r.report_date DESC, m.id ASC`,
+        args: [userId]
+      });
+    } catch (e) {
+      console.warn('[AI Context] Measurements query error:', e);
+    }
+
+    try {
+      risksRes = await db.execute({
+        sql: 'SELECT domain, level, label, evidence FROM risk_assessment WHERE user_id = ? ORDER BY id ASC',
+        args: [userId]
+      });
+    } catch (e) {
+      console.warn('[AI Context] Risk assessment query error:', e);
+    }
+
+    try {
+      guidanceRes = await db.execute({
+        sql: 'SELECT domain, suggested_specialty, evidence FROM specialty_guidance WHERE user_id = ? ORDER BY id ASC',
+        args: [userId]
+      });
+    } catch (e) {
+      console.warn('[AI Context] Specialty guidance query error:', e);
+    }
+
+    try {
+      outlookRes = await db.execute({
+        sql: 'SELECT parameter, display_name, forecast_direction, forecast_range, confidence_category, limitations FROM future_outlook WHERE user_id = ? ORDER BY id ASC',
+        args: [userId]
+      });
+    } catch (e) {
+      console.warn('[AI Context] Future outlook query error:', e);
+    }
+
+    let guidances = guidanceRes.rows;
+    if (guidances.length === 0 && measurementsRes.rows.length > 0) {
+      try {
+        guidances = await generateSpecialtyGuidance(userId);
+      } catch (e) {
+        console.warn('Auto-generation of specialty guidance deferred:', e);
+      }
+    }
+
+    const rawUser = userRes.rows[0];
+    let calculatedAge: number | null = null;
+    if (rawUser && rawUser.date_of_birth) {
+      const dob = new Date(String(rawUser.date_of_birth));
+      if (!isNaN(dob.getTime())) {
+        const diffMs = Date.now() - dob.getTime();
+        calculatedAge = Math.floor(diffMs / (1000 * 60 * 60 * 24 * 365.25));
+      }
+    }
+
+    const contextData: MedicalContextData = {
+      user: rawUser ? { ...rawUser, age: calculatedAge } : null,
+      reports: completedReportsRes.rows,
+      pendingReports: pendingReportsRes.rows,
+      measurements: measurementsRes.rows,
+      risks: risksRes.rows,
+      guidances,
+      outlooks: outlookRes.rows,
+      hasData: completedReportsRes.rows.length > 0 || measurementsRes.rows.length > 0
+    };
+
+    // 4. Persist newly compiled context into medical_analysis_cache
+    const now = new Date().toISOString();
+    try {
+      await db.execute({
+        sql: `INSERT INTO medical_analysis_cache (user_id, fingerprint, data, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?)
+              ON CONFLICT(user_id) DO UPDATE SET fingerprint = excluded.fingerprint, data = excluded.data, updated_at = excluded.updated_at`,
+        args: [userId, currentFingerprint, JSON.stringify(contextData), now, now]
+      });
+    } catch (err) {
+      console.warn('[AI Cache] Failed to persist medical_analysis_cache:', err);
+    }
+
+    return { contextData, fromCache: false, fingerprint: currentFingerprint };
+  } catch (outerErr) {
+    console.error('[AI Context] Unexpected error compiling medical context:', outerErr);
+    return {
+      contextData: {
+        user: null,
+        reports: [],
+        pendingReports: [],
+        measurements: [],
+        risks: [],
+        guidances: [],
+        outlooks: [],
+        hasData: false
+      },
+      fromCache: false,
+      fingerprint: 'fallback'
+    };
+  }
+}
+
+function formatClinicalContext(ctx: MedicalContextData): string {
+  if (!ctx.hasData) {
+    let msg = 'Patient Medical Records: No validated reports or laboratory measurements on file.';
+    if (ctx.pendingReports && ctx.pendingReports.length > 0) {
+      msg += `\nUnprocessed Reports: ${ctx.pendingReports.map(p => `${p.filename} (${p.processing_status})`).join(', ')}`;
+    }
+    return msg;
+  }
+
+  const userLine = ctx.user ? `Patient: ${ctx.user.name || 'Anonymous'}${ctx.user.age ? `, Age: ${ctx.user.age}` : ''}${ctx.user.gender ? `, Gender: ${ctx.user.gender}` : ''}` : '';
+  const reportsList = ctx.reports.map((r: any) => `- ${r.filename} (Collection Date: ${r.report_date || 'Unknown'}, Type: ${r.report_type || 'General Lab'})`).join('\n');
+  const measurementsList = ctx.measurements.slice(0, 40).map((m: any) => `- ${m.parameter}: ${m.normalized_value || m.raw_value} ${m.unit || ''} [Date: ${m.report_date}, Report: ${m.filename}, Status: ${m.validation_status || 'EXTRACTED'}]`).join('\n');
+  const risksList = ctx.risks.length > 0
+    ? ctx.risks.map((r: any) => `- ${r.domain}: ${r.level} (${r.label}) - ${r.evidence}`).join('\n')
+    : 'None recorded';
+  const guidanceList = ctx.guidances.length > 0
+    ? ctx.guidances.map((g: any) => `- ${g.suggested_specialty} (${g.domain}) - ${typeof g.evidence === 'string' && !g.evidence.startsWith('{') ? g.evidence : 'Validated laboratory findings'}`).join('\n')
+    : 'None recorded';
+  const outlooksList = ctx.outlooks.length > 0
+    ? ctx.outlooks.map((o: any) => `- ${o.display_name || o.parameter}: Trend ${o.forecast_direction} (${o.forecast_range}), Confidence: ${o.confidence_category}`).join('\n')
+    : 'None recorded';
+
+  let pendingNote = '';
+  if (ctx.pendingReports && ctx.pendingReports.length > 0) {
+    pendingNote = `\nPending Reports (Data not yet extracted): ${ctx.pendingReports.map(p => `${p.filename} [Status: ${p.processing_status}]`).join(', ')}`;
+  }
+
+  return `
+${userLine}
+Verified Medical Reports (${ctx.reports.length} total):
+${reportsList || 'None'}
+${pendingNote}
+
+Validated Biomarkers & Measurements (${ctx.measurements.length} total):
+${measurementsList || 'None'}
+
+Active Clinical Risk Assessments:
+${risksList}
+
+Specialty Consultations Suggested:
+${guidanceList}
+
+Future Outlook Projections:
+${outlooksList}
+`.trim();
+}
+
+function generateGroundedRuleResponse(message: string, ctx: MedicalContextData): string {
+  const cleanMsg = message.trim();
+  const lower = cleanMsg.toLowerCase();
+
+  // 1. Natural greeting handling (works whether user has medical records or not)
+  const isGreeting = /^(hi|hello|hey|good\s*(morning|afternoon|evening)|greetings|howdy)\b/i.test(cleanMsg);
+  if (isGreeting) {
+    if (ctx.hasData) {
+      return `Hello! I am your MediTrack clinical assistant. I have access to your **${ctx.reports.length}** verified report(s) and **${ctx.measurements.length}** validated biomarker measurement(s).\n\nYou can ask me to explain your blood report, check specific test readings (such as hemoglobin, cholesterol, glucose, or kidney function), compare historical dates, or clarify why specific medical specialties were recommended. How can I help you today?`;
+    }
+    return `Hello! I am your MediTrack clinical assistant.\n\nYou do not have any uploaded medical reports in your account yet. You can upload laboratory reports (PDF or image) in the **Reports** tab. Once processed, I can help you analyze biomarker values, track historical progressions, and provide evidence-grounded insights.\n\nHow can I help you today?`;
+  }
+
+  // 2. User has no medical records and asked a medical question
+  if (!ctx.hasData) {
+    let reply = `**Answer:** You currently do not have any uploaded medical reports or laboratory measurements in your MediTrack profile.\n\n` +
+      `**Limitations:** Without verified clinical documentation, I cannot analyze your biomarker levels, explain blood test results, or formulate specialty guidance.\n\n` +
+      `**Next Steps:** Please navigate to the **Reports** tab and upload your laboratory reports (PDF or image). Once processed, I can explain your results and track longitudinal trends.`;
+    if (ctx.pendingReports && ctx.pendingReports.length > 0) {
+      reply += `\n\n*Note: You have ${ctx.pendingReports.length} report(s) currently in progress: ${ctx.pendingReports.map(p => `\`${p.filename}\` (${p.processing_status})`).join(', ')}. Once complete, their data will appear here automatically.*`;
+    }
+    return reply;
+  }
+
+  // 3. Latest blood report explanation
+  if (lower.includes('latest blood report') || lower.includes('blood report') || (lower.includes('explain') && !lower.includes('why') && !lower.includes('cardio') && !lower.includes('cholesterol') && !lower.includes('glucose') && !lower.includes('hemoglobin'))) {
+    const latestReport = ctx.reports[0];
+    const reportMeas = ctx.measurements.filter(m => m.filename === latestReport?.filename);
+    const displayMeas = reportMeas.length > 0 ? reportMeas.slice(0, 8) : ctx.measurements.slice(0, 8);
+
+    if (displayMeas.length === 0) {
+      return `**Answer:** Your latest report on file is **${latestReport?.filename || 'recent report'}** (collected on ${latestReport?.report_date || 'recorded date'}), but no individual biomarker measurements have been extracted from it yet.\n\n` +
+        `**Limitations:** If this was an image or scanned document, please verify that it was clear and legible.\n\n` +
+        `**Sources:** Report: ${latestReport?.filename || 'Unknown'}`;
+    }
+
+    return `**Answer:** Here is a summary of your validated laboratory parameters from your latest medical report:\n\n` +
+      `**Your medical data:**\n` +
+      displayMeas.map(m => `• **${m.parameter}**: ${m.normalized_value || m.raw_value} ${m.unit} [Observed: ${m.report_date}]`).join('\n') +
+      `\n\n**Explanation:** These laboratory biomarkers reflect your metabolic and physiological status on ${latestReport?.report_date || 'the test date'}. Longitudinal consistency across these parameters is essential for tracking ongoing health.\n\n` +
+      `**Limitations:** Clinical evaluation requires interpreting these findings alongside your overall symptoms, physical exam, and complete health history.\n\n` +
+      `**Sources:** ${latestReport?.filename || 'Recent report'} (${latestReport?.report_date || 'N/A'}).`;
+  }
+
+  // 4. Hemoglobin / CBC / Blood count questions
+  if (lower.includes('hemoglobin') || lower.includes('hb') || lower.includes('cbc') || lower.includes('platelet') || lower.includes('wbc') || lower.includes('rbc') || lower.includes('hematocrit')) {
+    const hb = ctx.measurements.find(m => {
+      const p = String(m.parameter).toLowerCase();
+      return p.includes('hemoglobin') || p === 'hb';
+    });
+    const wbc = ctx.measurements.find(m => {
+      const p = String(m.parameter).toLowerCase();
+      return p.includes('wbc') || p.includes('leukocyte');
+    });
+    const plt = ctx.measurements.find(m => String(m.parameter).toLowerCase().includes('platelet'));
+    const rbc = ctx.measurements.find(m => {
+      const p = String(m.parameter).toLowerCase();
+      return p.includes('rbc') || p.includes('erythrocyte');
+    });
+
+    const items: string[] = [];
+    if (hb) items.push(`• **Hemoglobin**: ${hb.normalized_value || hb.raw_value} ${hb.unit} (Report: ${hb.filename}, Date: ${hb.report_date})`);
+    if (rbc) items.push(`• **RBC Count**: ${rbc.normalized_value || rbc.raw_value} ${rbc.unit} (Report: ${rbc.filename}, Date: ${rbc.report_date})`);
+    if (wbc) items.push(`• **WBC Count**: ${wbc.normalized_value || wbc.raw_value} ${wbc.unit} (Report: ${wbc.filename}, Date: ${wbc.report_date})`);
+    if (plt) items.push(`• **Platelets**: ${plt.normalized_value || plt.raw_value} ${plt.unit} (Report: ${plt.filename}, Date: ${plt.report_date})`);
+
+    if (items.length === 0) {
+      return `**Answer:** No hemoglobin or complete blood count (CBC) measurements were found in your uploaded records.\n\n` +
+        `**Limitations:** Your ${ctx.reports.length} uploaded report(s) (${ctx.reports.map(r => r.filename).join(', ')}) do not contain tested hemoglobin or CBC records.\n\n` +
+        `**Next Steps:** Please upload your Complete Blood Count (CBC) report under the **Reports** tab to review hemoglobin and cell counts.`;
+    }
+
+    return `**Answer:** Here are the hematologic parameters extracted from your validated laboratory results:\n\n` +
+      `**Your medical data:**\n` +
+      items.join('\n') +
+      `\n\n**Explanation:** Hemoglobin is an iron-containing oxygen transport protein in red blood cells. Adult reference ranges are generally ~13.8–17.2 g/dL for adult males and ~12.1–15.1 g/dL for adult females, though lab-specific calibration ranges apply.\n\n` +
+      `**Limitations:** Hydration status and nutritional factors can alter hemoglobin concentration. Consult your physician for personalized evaluation.\n\n` +
+      `**Sources:** Verified laboratory records (${[...new Set([hb?.filename, rbc?.filename, wbc?.filename, plt?.filename].filter(Boolean))].join(', ')}).`;
+  }
+
+  // 5. Cardiology / Cholesterol / Heart questions
+  if (lower.includes('cardiology') || lower.includes('cholesterol') || lower.includes('heart') || lower.includes('lipid') || lower.includes('ldl') || lower.includes('blood pressure') || lower.includes('hypertension')) {
+    const ldl = ctx.measurements.find(m => String(m.parameter).toLowerCase().includes('ldl'));
+    const tc = ctx.measurements.find(m => {
+      const p = String(m.parameter).toLowerCase();
+      return p.includes('cholesterol') && !p.includes('ldl') && !p.includes('hdl');
+    });
+    const hdl = ctx.measurements.find(m => String(m.parameter).toLowerCase().includes('hdl'));
+    const bp = ctx.measurements.find(m => String(m.parameter).toLowerCase().includes('pressure') || String(m.parameter).toLowerCase().includes('bp'));
+    const cardioGuidance = ctx.guidances.find(g => g.domain === 'cardiovascular' || String(g.suggested_specialty).toLowerCase().includes('cardio'));
+
+    const dataItems: string[] = [];
+    if (ldl) dataItems.push(`• **LDL Cholesterol**: ${ldl.normalized_value || ldl.raw_value} ${ldl.unit} (Report: ${ldl.filename}, Date: ${ldl.report_date})`);
+    if (tc) dataItems.push(`• **Total Cholesterol**: ${tc.normalized_value || tc.raw_value} ${tc.unit} (Report: ${tc.filename}, Date: ${tc.report_date})`);
+    if (hdl) dataItems.push(`• **HDL Cholesterol**: ${hdl.normalized_value || hdl.raw_value} ${hdl.unit} (Report: ${hdl.filename}, Date: ${hdl.report_date})`);
+    if (bp) dataItems.push(`• **Blood Pressure**: ${bp.normalized_value || bp.raw_value} ${bp.unit} (Report: ${bp.filename}, Date: ${bp.report_date})`);
+
+    if (dataItems.length === 0) {
+      return `**Answer:** No cardiovascular biomarkers (such as LDL, HDL, Total Cholesterol, or Blood Pressure) were found in your uploaded records.\n\n` +
+        `**Limitations:** You have ${ctx.reports.length} report(s) on file, but none contain documented lipid or blood pressure readings.\n\n` +
+        `**Next Steps:** Upload a comprehensive metabolic panel or lipid profile report to review cardiovascular indicators.`;
+    }
+
+    let answerText = cardioGuidance
+      ? `Cardiology consultation was recommended to evaluate your cardiovascular risk markers.`
+      : `Here are the cardiovascular parameters documented in your medical records:`;
+
+    let explanationText = `Cardiovascular markers such as LDL cholesterol and blood pressure provide quantitative insight into arterial health and long-term cardiovascular risk.`;
+    if (cardioGuidance && cardioGuidance.evidence) {
+      explanationText += ` Clinical guidance reasoning: ${cardioGuidance.evidence}`;
+    }
+
+    return `**Answer:** ${answerText}\n\n` +
+      `**Your medical data:**\n` +
+      dataItems.join('\n') +
+      `\n\n**Explanation:** ${explanationText}\n\n` +
+      `**Limitations:** Laboratory indicators should be evaluated in context of lifestyle, family history, and cardiovascular risk scores by a physician.\n\n` +
+      `**Sources:** Verified laboratory records (${[...new Set([ldl?.filename, tc?.filename, hdl?.filename, bp?.filename].filter(Boolean))].join(', ')}).`;
+  }
+
+  // 6. Glucose / Diabetes / Metabolic questions
+  if (lower.includes('glucose') || lower.includes('sugar') || lower.includes('diabetes') || lower.includes('hba1c') || lower.includes('a1c') || lower.includes('metabolic')) {
+    const glu = ctx.measurements.find(m => String(m.parameter).toLowerCase().includes('glucose') || String(m.parameter).toLowerCase().includes('sugar'));
+    const a1c = ctx.measurements.find(m => String(m.parameter).toLowerCase().includes('hba1c') || String(m.parameter).toLowerCase().includes('a1c'));
+    const metabGuidance = ctx.guidances.find(g => g.domain === 'metabolic' || String(g.suggested_specialty).toLowerCase().includes('endocrin'));
+
+    const items: string[] = [];
+    if (glu) items.push(`• **Fasting/Random Glucose**: ${glu.normalized_value || glu.raw_value} ${glu.unit} (Date: ${glu.report_date}, Report: ${glu.filename})`);
+    if (a1c) items.push(`• **HbA1c**: ${a1c.normalized_value || a1c.raw_value} ${a1c.unit} (Date: ${a1c.report_date}, Report: ${a1c.filename})`);
+
+    if (items.length === 0) {
+      return `**Answer:** No blood glucose or HbA1c measurements were identified in your uploaded medical reports.\n\n` +
+        `**Limitations:** Your current records do not include glycemic laboratory panels.\n\n` +
+        `**Next Steps:** Upload a diabetic panel or fasting metabolic test report if you wish to analyze blood sugar regulation.`;
+    }
+
+    return `**Answer:** Here are your metabolic biomarkers extracted from your laboratory results:\n\n` +
+      `**Your medical data:**\n` +
+      items.join('\n') +
+      `\n\n**Explanation:** Blood glucose measures circulating blood sugar, while HbA1c provides an estimate of average glycemic control over the preceding 2 to 3 months.${metabGuidance ? ` Specialty guidance: ${metabGuidance.suggested_specialty} (${metabGuidance.evidence || 'Metabolic monitoring'})` : ''}\n\n` +
+      `**Limitations:** Fasting status at the time of specimen collection affects glucose interpretations.\n\n` +
+      `**Sources:** ${[...new Set([glu?.filename, a1c?.filename].filter(Boolean))].join(', ')}.`;
+  }
+
+  // 7. Kidney / Renal / Creatinine / eGFR questions
+  if (lower.includes('kidney') || lower.includes('creatinine') || lower.includes('egfr') || lower.includes('renal') || lower.includes('nephro')) {
+    const cr = ctx.measurements.find(m => String(m.parameter).toLowerCase().includes('creatinine'));
+    const egfr = ctx.measurements.find(m => String(m.parameter).toLowerCase().includes('egfr'));
+
+    const items: string[] = [];
+    if (cr) items.push(`• **Creatinine**: ${cr.normalized_value || cr.raw_value} ${cr.unit} (Date: ${cr.report_date}, Report: ${cr.filename})`);
+    if (egfr) items.push(`• **eGFR**: ${egfr.normalized_value || egfr.raw_value} ${egfr.unit} (Date: ${egfr.report_date}, Report: ${egfr.filename})`);
+
+    if (items.length === 0) {
+      return `**Answer:** No renal function markers (such as Creatinine or eGFR) were found in your uploaded records.\n\n` +
+        `**Limitations:** Renal indicators were not detected in your ${ctx.reports.length} uploaded report(s).\n\n` +
+        `**Next Steps:** Upload a Comprehensive Metabolic Panel (CMP) or Renal Function Panel to review kidney markers.`;
+    }
+
+    return `**Answer:** Here are the renal function values documented in your validated records:\n\n` +
+      `**Your medical data:**\n` +
+      items.join('\n') +
+      `\n\n**Explanation:** Serum creatinine and estimated glomerular filtration rate (eGFR) evaluate the filtration efficiency of the kidneys.\n\n` +
+      `**Limitations:** Muscle mass, hydration, and acute illness can influence serum creatinine levels.\n\n` +
+      `**Sources:** ${[...new Set([cr?.filename, egfr?.filename].filter(Boolean))].join(', ')}.`;
+  }
+
+  // 8. Generic parameter match (e.g. user asks about any other specific test on file)
+  const queryTokens = lower.split(/[^a-zA-Z0-9]+/).filter(w => w.length > 2 && !['what', 'does', 'mean', 'result', 'test', 'level', 'latest', 'show', 'value', 'have', 'from', 'about', 'explain', 'tell'].includes(w));
+  const matchedParams = ctx.measurements.filter(m => {
+    const p = String(m.parameter).toLowerCase();
+    return queryTokens.some(tok => p.includes(tok));
   });
-  res.json(result.rows);
+
+  if (matchedParams.length > 0 && queryTokens.length > 0) {
+    const uniqueMatched = matchedParams.slice(0, 6);
+    return `**Answer:** Here are the matching measurements found in your medical records for your query:\n\n` +
+      `**Your medical data:**\n` +
+      uniqueMatched.map(m => `• **${m.parameter}**: ${m.normalized_value || m.raw_value} ${m.unit} (Report: ${m.filename}, Date: ${m.report_date})`).join('\n') +
+      `\n\n**Explanation:** These are your recorded laboratory results. Please consult with your healthcare provider to discuss how these values align with your clinical context.\n\n` +
+      `**Limitations:** Single laboratory values should be considered in longitudinal context.\n\n` +
+      `**Sources:** ${[...new Set(uniqueMatched.map(m => m.filename))].join(', ')}.`;
+  }
+
+  // 9. Compare results across dates
+  if (lower.includes('compare') || lower.includes('previous') || lower.includes('trend') || lower.includes('history')) {
+    if (ctx.reports.length < 2) {
+      const single = ctx.reports[0];
+      return `**Answer:** Longitudinal trend comparison requires at least two medical reports collected on different dates.\n\n` +
+        `**Your medical data:** You currently have 1 verified report on file (**${single?.filename}**, dated **${single?.report_date || 'N/A'}**).\n\n` +
+        `**Next Steps:** Upload your historical or recent follow-up lab tests in the **Reports** tab to generate longitudinal comparison curves.`;
+    }
+
+    const distinctDates = [...new Set(ctx.reports.map(r => r.report_date).filter(Boolean))];
+    const multiDateParams: string[] = [];
+
+    const paramMap: Record<string, any[]> = {};
+    for (const m of ctx.measurements) {
+      const p = m.parameter;
+      if (!paramMap[p]) paramMap[p] = [];
+      paramMap[p].push(m);
+    }
+
+    for (const p in paramMap) {
+      const uniqueObsDates = new Set(paramMap[p].map(x => x.report_date));
+      if (uniqueObsDates.size >= 2) {
+        const sorted = paramMap[p].sort((a, b) => String(a.report_date).localeCompare(String(b.report_date)));
+        const first = sorted[0];
+        const last = sorted[sorted.length - 1];
+        multiDateParams.push(`• **${p}**: ${first.normalized_value || first.raw_value} ${first.unit} (${first.report_date}) → ${last.normalized_value || last.raw_value} ${last.unit} (${last.report_date})`);
+      }
+    }
+
+    return `**Answer:** Comparing your health measurements across your ${ctx.reports.length} uploaded reports (${distinctDates.join(', ')}):\n\n` +
+      `**Your medical data:**\n` +
+      (multiDateParams.length > 0 ? multiDateParams.slice(0, 6).join('\n') : `• Measurements were collected across dates: ${distinctDates.join(', ')}.`) +
+      `\n\n**Explanation:** Longitudinal tracking highlights physiological stability or trends over time. You can view full interactive trend graphs and future outlook forecasts under the **Trends** and **Future Outlook** tabs.\n\n` +
+      `**Limitations:** Differing reference laboratories or assay methodologies between reports can introduce minor variations.\n\n` +
+      `**Sources:** Reports: ${ctx.reports.map(r => `${r.filename} (${r.report_date})`).join(', ')}.`;
+  }
+
+  // 10. Lifestyle / Improve test results
+  if (lower.includes('improve') || lower.includes('lifestyle') || lower.includes('diet') || lower.includes('exercise')) {
+    return `**Answer:** General evidence-based lifestyle strategies to discuss with your healthcare provider:\n\n` +
+      `• **Cardiovascular Support:** Prioritize heart-healthy dietary patterns (e.g. rich in soluble fiber and omega-3s) alongside routine moderate aerobic activity (e.g. 150 min/week).\n` +
+      `• **Metabolic Regulation:** Balance complex carbohydrates with lean protein and stay consistently hydrated.\n` +
+      `• **Follow-Up:** Schedule periodic re-testing with your physician to monitor biomarkers that require longitudinal follow-up.\n\n` +
+      `**Limitations:** Lifestyle adjustments should always be personalized in consultation with your primary physician.\n\n` +
+      `**Sources:** MediTrack Evidence-Based Clinical Guidance Guidelines.`;
+  }
+
+  // 11. General overview fallback
+  const uniqueParams = [...new Set(ctx.measurements.map(m => m.parameter))];
+  const specialties = ctx.guidances.map(g => g.suggested_specialty).filter(Boolean);
+
+  return `**Answer:** I am your MediTrack clinical assistant. I have access to your **${ctx.reports.length}** verified report(s) and **${ctx.measurements.length}** validated measurement(s).\n\n` +
+    `**Your medical data:**\n` +
+    `• **Active Biomarkers Tracked (${uniqueParams.length}):** ${uniqueParams.slice(0, 7).join(', ')}${uniqueParams.length > 7 ? '...' : ''}\n` +
+    (specialties.length > 0 ? `• **Recommended Consultations:** ${[...new Set(specialties)].join(', ')}\n` : '') +
+    `\n**Explanation:** You can ask me to explain your blood report, review specific biomarkers (e.g. cholesterol, hemoglobin, glucose, kidney function), or compare historical test dates.\n\n` +
+    `**Limitations:** This assistant provides educational insights based strictly on your uploaded records and does not substitute for licensed clinical diagnosis.\n\n` +
+    `**Sources:** Authorized patient medical records.`;
+}
+
+// --- AI ASSISTANT CHAT HISTORY ROUTES ---
+app.get('/api/ai/chat/history', authenticateToken, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    const result = await db.execute({
+      sql: 'SELECT id, role, content, created_at as timestamp FROM chat_messages WHERE user_id = ? ORDER BY id ASC LIMIT 50',
+      args: [userId]
+    });
+    res.json(result.rows.map(r => ({
+      id: String(r.id),
+      role: r.role,
+      content: r.content,
+      timestamp: r.timestamp
+    })));
+  } catch (error: any) {
+    console.error('Error fetching chat history:', error);
+    res.status(500).json({ error: 'Failed to retrieve conversation history' });
+  }
+});
+
+app.delete('/api/ai/chat/history', authenticateToken, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    await db.execute({
+      sql: 'DELETE FROM chat_messages WHERE user_id = ?',
+      args: [userId]
+    });
+    res.json({ success: true, message: 'Chat history cleared' });
+  } catch (error: any) {
+    console.error('Error clearing chat history:', error);
+    res.status(500).json({ error: 'Failed to clear conversation history' });
+  }
+});
+
+// --- AI ASSISTANT CHAT ROUTE ---
+app.post('/api/ai/chat', authenticateToken, chatRateLimiter, async (req: any, res) => {
+  try {
+    const { message, history } = req.body;
+    if (!message || typeof message !== 'string' || !message.trim()) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+    if (message.length > 2000) {
+      return res.status(400).json({ error: 'Message is too long (maximum 2000 characters)' });
+    }
+
+    const userId = req.user.id;
+    const now = new Date().toISOString();
+
+    // 1. Persist user's message to conversation history
+    try {
+      await db.execute({
+        sql: 'INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?, ?, ?, ?)',
+        args: [userId, 'user', message.trim(), now]
+      });
+    } catch (dbErr) {
+      console.warn('Failed to persist user chat message:', dbErr);
+    }
+
+    // 2. Retrieve authorized medical context (cached or freshly generated)
+    let contextData: MedicalContextData;
+    try {
+      const ctxResult = await getUserMedicalAnalysisContext(userId);
+      contextData = ctxResult.contextData;
+    } catch (ctxErr: any) {
+      console.warn('[AI Chat] Context retrieval fallback:', ctxErr);
+      contextData = {
+        user: null,
+        reports: [],
+        pendingReports: [],
+        measurements: [],
+        risks: [],
+        guidances: [],
+        outlooks: [],
+        hasData: false
+      };
+    }
+    const clinicalContext = formatClinicalContext(contextData);
+
+    let reply = '';
+
+    // 3. Inference: Primary Gemini AI with fallback to grounded clinical rule engine
+    if (aiService.isConfigured()) {
+      try {
+        reply = await aiService.generateChatResponse(message, clinicalContext, history);
+      } catch (aiErr: any) {
+        console.warn('Gemini chat unavailable or failed, engaging grounded clinical rule responder:', aiErr.message);
+        reply = generateGroundedRuleResponse(message, contextData);
+      }
+    } else {
+      reply = generateGroundedRuleResponse(message, contextData);
+    }
+
+    // 4. Persist assistant reply to conversation history
+    try {
+      await db.execute({
+        sql: 'INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?, ?, ?, ?)',
+        args: [userId, 'assistant', reply, new Date().toISOString()]
+      });
+    } catch (dbErr) {
+      console.warn('Failed to persist assistant chat message:', dbErr);
+    }
+
+    return res.json({ message: reply });
+  } catch (error: any) {
+    console.error('Error in /api/ai/chat:', error);
+    res.status(500).json({ error: 'AI assistant is temporarily unavailable. Please try again.' });
+  }
 });
 
 
@@ -2659,14 +3331,45 @@ app.delete('/api/contacts/:id', authenticateToken, async (req: any, res: any) =>
 });
 
 app.get('/api/alerts', authenticateToken, async (req: any, res: any) => {
-  const result = await db.execute({
-    sql: `SELECT a.*, c.name as contact_name 
-          FROM health_alerts a 
-          LEFT JOIN trusted_contacts c ON a.contact_id = c.id 
-          WHERE a.user_id = ? ORDER BY a.created_at DESC`,
-    args: [req.user.id]
-  });
-  res.json(result.rows);
+  try {
+    const alerts = await alertManager.getUserAlerts(req.user.id);
+    res.json(alerts);
+  } catch (err: any) {
+    console.error('Fetch alerts error:', err);
+    res.status(500).json({ error: 'Failed to retrieve health alerts' });
+  }
+});
+
+// Quick unread count endpoint for real-time polling
+app.get('/api/alerts/unread-count', authenticateToken, async (req: any, res: any) => {
+  try {
+    const result = await db.execute({
+      sql: 'SELECT count(*) as count FROM health_alerts WHERE user_id = ? AND is_read = 0',
+      args: [req.user.id]
+    });
+    res.json({ unreadCount: Number(result.rows[0]?.count || 0) });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to count unread alerts' });
+  }
+});
+
+// Inspect delivery audit records for a specific alert
+app.get('/api/alerts/:id/deliveries', authenticateToken, async (req: any, res: any) => {
+  try {
+    const alertCheck = await db.execute({
+      sql: 'SELECT id FROM health_alerts WHERE id = ? AND user_id = ?',
+      args: [req.params.id, req.user.id]
+    });
+    if (alertCheck.rows.length === 0) return res.status(404).json({ error: 'Alert not found' });
+
+    const result = await db.execute({
+      sql: 'SELECT * FROM notification_deliveries WHERE alert_id = ? ORDER BY created_at ASC',
+      args: [req.params.id]
+    });
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to retrieve alert delivery records' });
+  }
 });
 
 // Mark single alert as read (Phase 15)
@@ -2690,14 +3393,55 @@ app.put('/api/alerts/read-all', authenticateToken, async (req: any, res: any) =>
   res.json({ success: true });
 });
 
-// System route to generate health alert (Phase 13)
+// Test emergency alert send action
+app.post('/api/alerts/test-emergency', authenticateToken, async (req: any, res: any) => {
+  try {
+    const contactId = req.body.contact_id ? Number(req.body.contact_id) : undefined;
+    const testResult = await alertManager.sendTestEmergencyAlert(req.user.id, contactId);
+    res.json({
+      success: true,
+      alert: testResult.alert,
+      deliveries: testResult.deliveries
+    });
+  } catch (err: any) {
+    console.error('Test emergency alert failed:', err);
+    res.status(500).json({ error: err.message || 'Failed to dispatch test emergency alert' });
+  }
+});
+
+// Re-evaluate a report on demand
+app.post('/api/alerts/evaluate-report/:id', authenticateToken, async (req: any, res: any) => {
+  try {
+    const reportId = Number(req.params.id);
+    const alerts = await alertManager.processReportAlerts(req.user.id, reportId);
+    res.json({ success: true, count: alerts.length, alerts });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to evaluate report alerts' });
+  }
+});
+
+// System route to manually generate health alert (Phase 13)
 app.post('/api/alerts', authenticateToken, async (req: any, res: any) => {
-  const { type, message, source, contact_id } = req.body;
+  const { type, message, source, contact_id, severity, title, parameter, measured_value, reference_range } = req.body;
   const now = new Date().toISOString();
+  const alertSeverity = severity || type || 'WARNING';
   const result = await db.execute({
-    sql: `INSERT INTO health_alerts (user_id, contact_id, type, message, source, status, is_read, created_at) 
-          VALUES (?, ?, ?, ?, ?, ?, 0, ?) RETURNING *`,
-    args: [req.user.id, contact_id || null, type, message, source || 'Clinical System', 'DELIVERED', now]
+    sql: `INSERT INTO health_alerts (user_id, contact_id, type, severity, title, message, source, status, parameter, measured_value, reference_range, is_read, created_at) 
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?) RETURNING *`,
+    args: [
+      req.user.id, 
+      contact_id || null, 
+      alertSeverity, 
+      alertSeverity, 
+      title || message, 
+      message, 
+      source || 'Clinical System', 
+      'DELIVERED',
+      parameter || null,
+      measured_value || null,
+      reference_range || null,
+      now
+    ]
   });
   res.json(result.rows[0]);
 });
@@ -2888,8 +3632,21 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    const assetsPath = path.join(distPath, 'assets');
+    // Serve hashed static assets with immutable long-term cache
+    app.use('/assets', express.static(assetsPath, {
+      maxAge: '1y',
+      immutable: true
+    }));
+    // Serve other dist static files (e.g. favicon, robots.txt)
+    app.use(express.static(distPath, {
+      maxAge: '1h'
+    }));
+    // SPA fallback: index.html must never be cached aggressively so new deployments are picked up immediately
     app.get('{*splat}', (req, res) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

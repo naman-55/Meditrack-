@@ -236,6 +236,75 @@ class AIService {
       500
     );
   }
+
+  public async generateChatResponse(
+    userMessage: string,
+    clinicalContext: string,
+    history?: Array<{ role: string; content: string }>
+  ): Promise<string> {
+    if (!this.isConfigured() || !this.client) {
+      throw new GeminiAIError(
+        'GEMINI_NOT_CONFIGURED',
+        'Gemini AI API key is not configured on this server.',
+        503
+      );
+    }
+
+    const systemPrompt = `You are MediTrack AI Assistant, an authoritative, clinically cautious medical assistant designed to help patients understand their laboratory reports, health measurements, and specialist guidance.
+RULES:
+1. Grounding & Truth: Use ONLY the patient's verified clinical context provided below as ground truth. NEVER invent, estimate, or hallucinate laboratory values, dates, reports, reference ranges, or diagnoses.
+2. Missing Data: If the patient asks about a biomarker, test, or specialty that does not exist in their context, explicitly state that it is not present in their records and suggest uploading the relevant report. Never substitute sample or placeholder values.
+3. Citations & Attribution: Whenever citing a measurement, state the exact value, unit, collection date, and source report filename.
+4. Distinctions: Clearly distinguish verified historical laboratory observations from AI interpretations, statistical forecasts (Future Outlook), and algorithmic specialty guidance.
+5. Answer Format: Where relevant, structure your answer with:
+   - **Answer:** Direct response to the question.
+   - **Your medical data:** Actual values, units, dates, and report names used.
+   - **Explanation:** What the result generally indicates in plain terms.
+   - **Limitations:** Uncertainties, caveats, or missing context.
+   - **Sources:** Specific report and measurement references.
+   Do not force all five sections if a brief direct answer is more appropriate.
+6. Safety: Do NOT provide a definitive diagnosis or recommend altering prescribed medications. Always advise the patient to consult their licensed healthcare professional for clinical decisions.
+7. Style: Empathetic, clear, objective, and professional.
+
+PATIENT CLINICAL CONTEXT:
+${clinicalContext}`;
+
+    try {
+      const contents: any[] = [];
+      if (history && Array.isArray(history) && history.length > 0) {
+        for (const h of history.slice(-6)) {
+          if (h && typeof h.content === 'string' && h.content.trim()) {
+            contents.push({
+              role: h.role === 'user' ? 'user' : 'model',
+              parts: [{ text: h.content.trim() }]
+            });
+          }
+        }
+      }
+      contents.push({
+        role: 'user',
+        parts: [{ text: userMessage.trim() }]
+      });
+
+      const response = await this.client.models.generateContent({
+        model: this.defaultModel,
+        contents,
+        config: {
+          systemInstruction: systemPrompt,
+          temperature: 0.2
+        }
+      });
+
+      return response?.text || 'I have reviewed your clinical record. Please consult your physician for further evaluation.';
+    } catch (err: any) {
+      console.error('[AI Chat] Error calling Gemini:', err.message);
+      throw new GeminiAIError(
+        'CHAT_GENERATION_FAILED',
+        `Failed to generate response: ${err.message}`,
+        500
+      );
+    }
+  }
 }
 
 export const aiService = new AIService();

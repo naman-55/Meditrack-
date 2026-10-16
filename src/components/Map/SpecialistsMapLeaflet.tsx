@@ -297,7 +297,7 @@ export default function SpecialistsMapLeaflet({
       {isLoading && (
         <div className="absolute inset-0 bg-white/60 backdrop-blur-xs flex items-center justify-center z-10">
           <div className="flex items-center gap-3 bg-white px-4 py-2.5 rounded-xl shadow-lg border border-slate-200 text-slate-700 text-sm font-medium">
-            <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+            <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse" />
             <span>Fetching live healthcare providers...</span>
           </div>
         </div>

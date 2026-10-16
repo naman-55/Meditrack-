@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { adminService, SystemLog } from '../../api/admin';
 import { TerminalSquare, AlertTriangle, Info, ShieldAlert } from 'lucide-react';
+import { Skeleton } from '../../components/common/Skeleton';
 
 export default function AdminLogs() {
   const [logs, setLogs] = useState<SystemLog[]>([]);
@@ -61,7 +62,20 @@ export default function AdminLogs() {
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-2 font-mono text-xs">
           {loading ? (
-            <div className="text-slate-500">Loading system logs...</div>
+            <div className="space-y-3 py-2">
+              {[1, 2, 3, 4, 5, 6].map(i => (
+                <div key={i} className="flex items-center gap-3 p-2">
+                  <Skeleton className="w-4 h-4 rounded-full bg-slate-800" />
+                  <div className="flex-1 space-y-1.5">
+                    <div className="flex gap-2">
+                      <Skeleton className="h-3 w-32 rounded bg-slate-800" />
+                      <Skeleton className="h-3 w-16 rounded bg-slate-800" />
+                    </div>
+                    <Skeleton className="h-3 w-3/4 rounded bg-slate-800" />
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : logs.length === 0 ? (
             <div className="text-slate-500">No system events logged.</div>
           ) : (

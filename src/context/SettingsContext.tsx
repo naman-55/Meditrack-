@@ -16,6 +16,13 @@ export interface UserPreferences {
     weight: 'kg' | 'lbs';
     temperature: '°C' | '°F';
     timeFormat: '12h' | '24h';
+    glucose: 'mg/dL' | 'mmol/L';
+    cholesterol: 'mg/dL' | 'mmol/L';
+    creatinine: 'mg/dL' | 'µmol/L';
+    hemoglobin: 'g/dL' | 'g/L';
+    platelets: 'x10^3/µL' | 'lakh/µL';
+    bloodPressure: 'mmHg' | 'kPa';
+    labMode: 'standard' | 'original';
   };
   privacy: {
     locationAccess: boolean;
@@ -40,6 +47,13 @@ const DEFAULT_PREFERENCES: UserPreferences = {
     weight: 'kg',
     temperature: '°C',
     timeFormat: '12h',
+    glucose: 'mg/dL',
+    cholesterol: 'mg/dL',
+    creatinine: 'mg/dL',
+    hemoglobin: 'g/dL',
+    platelets: 'x10^3/µL',
+    bloodPressure: 'mmHg',
+    labMode: 'standard',
   },
   privacy: {
     locationAccess: true,
@@ -62,6 +76,7 @@ interface SettingsContextType {
   setUnit: (key: keyof UserPreferences['units'], val: any) => void;
   setPrivacy: (key: keyof UserPreferences['privacy'], val: boolean) => void;
   resetPreferences: () => void;
+  getPreferredUnit: (parameter: string) => string;
 }
 
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
@@ -96,12 +111,43 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       console.warn('Failed to persist settings:', e);
     }
 
+    // Apply theme (Light, Dark, or System) to document root
+    const theme = preferences.appearance.theme;
+    const mediaQuery = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+    const isDark = theme === 'Dark' || (theme === 'System' && !!mediaQuery?.matches);
+
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+      document.documentElement.setAttribute('data-theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+
+    const handleSystemThemeChange = (e: MediaQueryListEvent) => {
+      if (preferences.appearance.theme === 'System') {
+        if (e.matches) {
+          document.documentElement.classList.add('dark');
+          document.documentElement.setAttribute('data-theme', 'dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+          document.documentElement.setAttribute('data-theme', 'light');
+        }
+      }
+    };
+
+    mediaQuery?.addEventListener?.('change', handleSystemThemeChange);
+
     // Apply reduced animations to document root if enabled
     if (preferences.appearance.reduceAnimations) {
       document.documentElement.classList.add('reduce-motion');
     } else {
       document.documentElement.classList.remove('reduce-motion');
     }
+
+    return () => {
+      mediaQuery?.removeEventListener?.('change', handleSystemThemeChange);
+    };
   }, [preferences]);
 
   const openSettings = () => setIsOpen(true);
@@ -144,6 +190,38 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     setPreferences(DEFAULT_PREFERENCES);
   };
 
+  const getPreferredUnit = (parameter: string): string => {
+    const lower = (parameter || '').toLowerCase();
+    if (lower.includes('glucose') || lower.includes('sugar') || lower.includes('fbs')) {
+      return preferences.units.glucose || 'mg/dL';
+    }
+    if (lower.includes('cholesterol') || lower.includes('ldl') || lower.includes('hdl') || lower.includes('triglyceride')) {
+      return preferences.units.cholesterol || 'mg/dL';
+    }
+    if (lower.includes('creatinine')) {
+      return preferences.units.creatinine || 'mg/dL';
+    }
+    if (lower.includes('hemoglobin') || lower.includes('hb')) {
+      return preferences.units.hemoglobin || 'g/dL';
+    }
+    if (lower.includes('platelet')) {
+      return preferences.units.platelets || 'x10^3/µL';
+    }
+    if (lower.includes('blood_pressure') || lower.includes('bp')) {
+      return preferences.units.bloodPressure || 'mmHg';
+    }
+    if (lower.includes('height')) {
+      return preferences.units.height || 'cm';
+    }
+    if (lower.includes('weight')) {
+      return preferences.units.weight || 'kg';
+    }
+    if (lower.includes('temp')) {
+      return preferences.units.temperature || '°C';
+    }
+    return '';
+  };
+
   return (
     <SettingsContext.Provider
       value={{
@@ -158,6 +236,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         setUnit,
         setPrivacy,
         resetPreferences,
+        getPreferredUnit,
       }}
     >
       {children}

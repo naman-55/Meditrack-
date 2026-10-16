@@ -80,6 +80,14 @@ export const aiRateLimiter = createRateLimiter({
   code: 'AI_RATE_LIMIT_EXCEEDED'
 });
 
+// Conversational Chat Assistant: 60 requests per 5 minutes per user/IP
+export const chatRateLimiter = createRateLimiter({
+  windowMs: 5 * 60 * 1000,
+  maxRequests: 60,
+  message: 'Too many messages sent. Please wait a moment before sending another message.',
+  code: 'CHAT_RATE_LIMIT_EXCEEDED'
+});
+
 // General API: 300 requests per 5 minutes
 export const generalRateLimiter = createRateLimiter({
   windowMs: 5 * 60 * 1000,

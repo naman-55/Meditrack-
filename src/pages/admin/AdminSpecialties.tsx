@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { adminService, SpecialtyRule } from '../../api/admin';
 import { Stethoscope, Plus, Edit2 } from 'lucide-react';
+import { Skeleton } from '../../components/common/Skeleton';
 
 export default function AdminSpecialties() {
   const [rules, setRules] = useState<SpecialtyRule[]>([]);
@@ -114,7 +115,15 @@ export default function AdminSpecialties() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-500">Loading rules...</td></tr>
+                Array.from({ length: 4 }).map((_, i) => (
+                  <tr key={i}>
+                    <td className="px-6 py-4"><Skeleton className="h-4 w-28 rounded" /></td>
+                    <td className="px-6 py-4"><Skeleton className="h-4 w-32 rounded" /></td>
+                    <td className="px-6 py-4"><Skeleton className="h-3 w-48 rounded" /></td>
+                    <td className="px-6 py-4"><Skeleton className="h-3 w-12 rounded" /></td>
+                    <td className="px-6 py-4 text-right"><Skeleton className="h-7 w-8 rounded-md ml-auto" /></td>
+                  </tr>
+                ))
               ) : rules.length === 0 ? (
                 <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-500">No specialty rules found.</td></tr>
               ) : (

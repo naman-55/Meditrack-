@@ -5,7 +5,6 @@ import {
   Plus, 
   AlertCircle, 
   FileCheck2, 
-  Loader2, 
   Calendar, 
   Trash2, 
   Eye, 
@@ -17,6 +16,8 @@ import {
   ShieldCheck 
 } from 'lucide-react';
 import { reportsService, MedicalReport, Measurement } from '../api/reports';
+import { getCompatibleUnits, convertUnit } from '../lib/units';
+import { ReportListSkeleton, ReportDetailsSkeleton, Skeleton } from '../components/common/Skeleton';
 
 export default function Reports() {
   const [reports, setReports] = useState<MedicalReport[]>([]);
@@ -40,6 +41,34 @@ export default function Reports() {
   const [previewTab, setPreviewTab] = useState<'document' | 'biomarkers' | 'raw_pdf'>('document');
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
+  const [selectedUnits, setSelectedUnits] = useState<Record<string, string>>({});
+
+  const getRowDisplay = (m: Measurement, idx: number) => {
+    const rowKey = `${m.id || idx}_${m.parameter}`;
+    const rawStr = String(m.raw_value || m.normalized_value || '');
+    const rawNum = parseFloat(rawStr.replace(/[^0-9.]/g, ''));
+    const originalUnit = m.unit || '';
+    const compat = getCompatibleUnits(m.parameter);
+    const activeUnit = selectedUnits[rowKey] || originalUnit;
+    const isConverted = activeUnit.toLowerCase() !== originalUnit.toLowerCase() && !isNaN(rawNum);
+
+    let displayedVal = rawStr;
+    if (isConverted) {
+      const conv = convertUnit(rawNum, originalUnit, activeUnit, { parameter: m.parameter });
+      if (conv.success && conv.value !== null) {
+        displayedVal = conv.value.toString();
+      }
+    }
+
+    return {
+      displayedVal,
+      activeUnit,
+      originalUnit,
+      compat,
+      isConverted,
+      rowKey
+    };
+  };
 
   useEffect(() => {
     fetchReports();
@@ -93,12 +122,14 @@ export default function Reports() {
   }, [previewReport]);
 
   const fetchReports = async () => {
+    setLoading(true);
+    setError(null);
     try {
       const data = await reportsService.getReports();
       setReports(data);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError('Failed to load reports');
+      setError(err?.message || 'Failed to load reports');
     } finally {
       setLoading(false);
     }
@@ -221,9 +252,17 @@ export default function Reports() {
             <AlertCircle className="w-5 h-5 mr-2 shrink-0" />
             <p>{error}</p>
           </div>
-          <button onClick={() => setError(null)} className="text-red-500 hover:text-red-700">
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={fetchReports}
+              className="text-xs font-semibold px-2.5 py-1 bg-red-100 hover:bg-red-200 text-red-800 rounded-lg transition-colors"
+            >
+              Retry
+            </button>
+            <button onClick={() => setError(null)} className="text-red-500 hover:text-red-700">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -279,7 +318,17 @@ export default function Reports() {
                 disabled={uploading || !file}
                 className="w-full sm:w-auto inline-flex justify-center items-center px-6 py-2.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 disabled:opacity-50 transition-colors"
               >
-                {uploading ? <><Loader2 className="w-5 h-5 mr-2 animate-spin" /> Processing...</> : <><Upload className="w-5 h-5 mr-2" /> Submit Document</>}
+                {uploading ? (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>Processing Document...</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-2">
+                    <Upload className="w-4 h-4" />
+                    <span>Submit Document</span>
+                  </span>
+                )}
               </button>
             </div>
           </form>
@@ -287,8 +336,8 @@ export default function Reports() {
       )}
 
       {loading ? (
-        <div className="flex justify-center py-12 text-slate-500"><Loader2 className="w-8 h-8 animate-spin" /></div>
-      ) : reports.length === 0 ? (
+        <ReportListSkeleton count={4} />
+      ) : error && reports.length === 0 ? null : reports.length === 0 ? (
         <div className="bg-white rounded-2xl p-12 text-center shadow-sm border border-slate-200">
           <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <FileText className="w-8 h-8 text-slate-400" />
@@ -364,7 +413,13 @@ export default function Reports() {
                           title="Download PDF File"
                           aria-label="Download PDF File"
                         >
-                          {downloadingId === report.id ? <Loader2 className="w-4 h-4 animate-spin text-indigo-600" /> : <Download className="w-4 h-4" />}
+                          {downloadingId === report.id ? (
+                            <span className="w-4 h-4 flex items-center justify-center">
+                              <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 animate-pulse" />
+                            </span>
+                          ) : (
+                            <Download className="w-4 h-4" />
+                          )}
                         </button>
                         <button
                           onClick={() => setDeletingId(report.id)}
@@ -428,7 +483,9 @@ export default function Reports() {
                   title="Download PDF File"
                 >
                   {downloadingId === previewReport.id ? (
-                    <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                    <span className="w-3.5 h-3.5 mr-1.5 inline-flex items-center justify-center">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    </span>
                   ) : (
                     <Download className="w-3.5 h-3.5 mr-1.5" />
                   )}
@@ -494,10 +551,7 @@ export default function Reports() {
             {/* Modal Body */}
             <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-100/60">
               {loadingDetails ? (
-                <div className="flex flex-col items-center justify-center py-24 text-slate-500 space-y-3">
-                  <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
-                  <p className="text-sm font-medium">Opening and verifying report details...</p>
-                </div>
+                <ReportDetailsSkeleton />
               ) : previewTab === 'document' ? (
                 /* OFFICIAL CLINICAL REPORT DOCUMENT VIEW */
                 <div className="max-w-4xl mx-auto space-y-6">
@@ -513,9 +567,8 @@ export default function Reports() {
                           className="max-h-[620px] mx-auto rounded-lg shadow-sm object-contain"
                         />
                       ) : (
-                        <div className="py-20 text-slate-400 flex items-center justify-center gap-2">
-                          <Loader2 className="w-5 h-5 animate-spin" />
-                          <span>Loading image preview...</span>
+                        <div className="p-4 space-y-4">
+                          <Skeleton className="h-80 sm:h-96 w-full rounded-xl" />
                         </div>
                       )}
                     </div>
@@ -609,16 +662,37 @@ export default function Reports() {
                                       flagColor = 'bg-purple-50 text-purple-700 border-purple-200';
                                     }
 
+                                    const disp = getRowDisplay(m, idx);
+
                                     return (
                                       <tr key={m.id || idx} className={idx % 2 === 1 ? 'bg-slate-50/50' : 'bg-white'}>
                                         <td className="py-3 px-4 font-semibold text-slate-900">
                                           {m.parameter}
                                         </td>
                                         <td className="py-3 px-4 font-bold text-slate-800">
-                                          {m.raw_value || m.normalized_value}
+                                          <div>
+                                            <span>{disp.displayedVal}</span>
+                                            {disp.isConverted && (
+                                              <span className="block text-[10px] text-indigo-600 font-mono mt-0.5">
+                                                Orig: {m.raw_value || m.normalized_value} {disp.originalUnit}
+                                              </span>
+                                            )}
+                                          </div>
                                         </td>
                                         <td className="py-3 px-4 font-mono text-xs text-slate-500">
-                                          {m.unit}
+                                          {disp.compat.length > 1 ? (
+                                            <select
+                                              value={disp.activeUnit}
+                                              onChange={(e) => setSelectedUnits(prev => ({ ...prev, [disp.rowKey]: e.target.value }))}
+                                              className="border border-slate-200 rounded px-1.5 py-0.5 text-xs bg-white text-slate-700 font-medium cursor-pointer hover:border-slate-300"
+                                            >
+                                              {disp.compat.map((u) => (
+                                                <option key={u} value={u}>{u}</option>
+                                              ))}
+                                            </select>
+                                          ) : (
+                                            <span>{m.unit}</span>
+                                          )}
                                         </td>
                                         <td className="py-3 px-4 text-xs text-slate-600 max-w-xs truncate" title={(m as any).source_text}>
                                           {(m as any).source_text || 'Standard reference reading'}
@@ -702,16 +776,37 @@ export default function Reports() {
                                 flagColor = 'bg-purple-50 text-purple-700 border-purple-200';
                               }
 
+                              const disp = getRowDisplay(m, idx);
+
                               return (
                                 <tr key={m.id || idx} className="hover:bg-slate-50/80 transition-colors">
                                   <td className="py-3 px-4 font-medium text-slate-900">
                                     {m.parameter}
                                   </td>
                                   <td className="py-3 px-4 font-semibold text-slate-800">
-                                    {m.raw_value || m.normalized_value}
+                                    <div>
+                                      <span>{disp.displayedVal}</span>
+                                      {disp.isConverted && (
+                                        <span className="block text-[10px] text-indigo-600 font-mono mt-0.5">
+                                          Orig: {m.raw_value || m.normalized_value} {disp.originalUnit}
+                                        </span>
+                                      )}
+                                    </div>
                                   </td>
                                   <td className="py-3 px-4 text-slate-500 font-mono text-xs">
-                                    {m.unit}
+                                    {disp.compat.length > 1 ? (
+                                      <select
+                                        value={disp.activeUnit}
+                                        onChange={(e) => setSelectedUnits(prev => ({ ...prev, [disp.rowKey]: e.target.value }))}
+                                        className="border border-slate-200 rounded px-1.5 py-0.5 text-xs bg-white text-slate-700 font-medium cursor-pointer hover:border-slate-300"
+                                      >
+                                        {disp.compat.map((u) => (
+                                          <option key={u} value={u}>{u}</option>
+                                        ))}
+                                      </select>
+                                    ) : (
+                                      <span>{m.unit}</span>
+                                    )}
                                   </td>
                                   <td className="py-3 px-4 text-xs text-slate-500 max-w-xs truncate" title={(m as any).source_text}>
                                     {(m as any).source_text || 'Standard reference reading'}
@@ -753,9 +848,8 @@ export default function Reports() {
                         className="w-full h-full min-h-[580px] border-0"
                       />
                     ) : (
-                      <div className="flex flex-col items-center justify-center min-h-[580px] text-slate-500 gap-2">
-                        <Loader2 className="w-6 h-6 animate-spin text-emerald-600" />
-                        <span>Rendering secure document preview...</span>
+                      <div className="p-6">
+                        <Skeleton className="w-full h-[580px] rounded-xl" />
                       </div>
                     )}
                   </div>
