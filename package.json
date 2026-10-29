@@ -10,6 +10,7 @@
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
+    "test": "tsx riskEngine.spec.ts && tsx gmailNotificationEngine.spec.ts && tsx telegramNotificationEngine.spec.ts && tsx telegramHealthAssistant.spec.ts",
     "telegram:bot": "tsx telegram-bot/runner.ts"
   },
   "dependencies": {

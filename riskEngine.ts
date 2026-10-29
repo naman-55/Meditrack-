@@ -58,6 +58,7 @@ interface ParsedObservation {
   date: string;
   report: string;
   page: string;
+  validationStatus?: string;
 }
 
 /**
@@ -80,6 +81,7 @@ function extractCanonicalObservations(measurements: MeasurementRecord[]): Map<st
     const reportName = m.report || 'Medical Report';
     const pageNum = m.page || '1';
     const dateStr = m.report_date || '';
+    const vStatus = m.validation_status;
 
     // Handle blood pressure compound format (e.g. "120/80")
     if (canonical === 'blood_pressure' || rawValStr.includes('/')) {
@@ -97,7 +99,8 @@ function extractCanonicalObservations(measurements: MeasurementRecord[]): Map<st
             canonicalUnit: 'mmHg',
             date: dateStr,
             report: reportName,
-            page: pageNum
+            page: pageNum,
+            validationStatus: vStatus
           });
         }
         if (dia !== null && dia >= 20 && dia <= 200) {
@@ -110,7 +113,8 @@ function extractCanonicalObservations(measurements: MeasurementRecord[]): Map<st
             canonicalUnit: 'mmHg',
             date: dateStr,
             report: reportName,
-            page: pageNum
+            page: pageNum,
+            validationStatus: vStatus
           });
         }
       }
@@ -138,7 +142,8 @@ function extractCanonicalObservations(measurements: MeasurementRecord[]): Map<st
       canonicalUnit,
       date: dateStr,
       report: reportName,
-      page: pageNum
+      page: pageNum,
+      validationStatus: vStatus
     });
   }
 
@@ -172,6 +177,23 @@ export function evaluateCardiovascularRisk(measurements: MeasurementRecord[]): R
         ['Blood Pressure', 'LDL Cholesterol', 'Total Cholesterol']
       ),
       data_quality: 'INSUFFICIENT',
+      rule_version: RISK_RULE_VERSION
+    };
+  }
+
+  const cardioObs = [sbp, dbp, ldl, chol, tg, hdl].filter(Boolean) as ParsedObservation[];
+  if (cardioObs.some(o => o.validationStatus && o.validationStatus !== 'VALIDATED')) {
+    return {
+      domain: 'cardiovascular',
+      level: 'GREY',
+      label: 'Unreliable Data',
+      evidence: buildEvidenceJson(
+        'One or more critical cardiovascular measurements have not been validated.',
+        'Review and validate pending clinical measurements before computing risk assessment.',
+        [],
+        ['Validated Measurements']
+      ),
+      data_quality: 'UNRELIABLE',
       rule_version: RISK_RULE_VERSION
     };
   }
@@ -344,6 +366,23 @@ export function evaluateMetabolicRisk(measurements: MeasurementRecord[]): RiskRe
     };
   }
 
+  const metabolicObs = [glucose, hba1c, bmi].filter(Boolean) as ParsedObservation[];
+  if (metabolicObs.some(o => o.validationStatus && o.validationStatus !== 'VALIDATED')) {
+    return {
+      domain: 'metabolic',
+      level: 'GREY',
+      label: 'Unreliable Data',
+      evidence: buildEvidenceJson(
+        'One or more critical metabolic measurements have not been validated.',
+        'Review and validate pending clinical measurements before computing risk assessment.',
+        [],
+        ['Validated Measurements']
+      ),
+      data_quality: 'UNRELIABLE',
+      rule_version: RISK_RULE_VERSION
+    };
+  }
+
   let maxRisk = 0;
   const evidenceList: any[] = [];
   const missingRequirements: string[] = [];
@@ -483,6 +522,23 @@ export function evaluateRenalRisk(measurements: MeasurementRecord[]): RiskResult
     };
   }
 
+  const renalObs = [creatinine, bun, egfr].filter(Boolean) as ParsedObservation[];
+  if (renalObs.some(o => o.validationStatus && o.validationStatus !== 'VALIDATED')) {
+    return {
+      domain: 'renal',
+      level: 'GREY',
+      label: 'Unreliable Data',
+      evidence: buildEvidenceJson(
+        'One or more renal function measurements have not been validated.',
+        'Review and validate pending clinical measurements before computing risk assessment.',
+        [],
+        ['Validated Measurements']
+      ),
+      data_quality: 'UNRELIABLE',
+      rule_version: RISK_RULE_VERSION
+    };
+  }
+
   let maxRisk = 0;
   const evidenceList: any[] = [];
   const missingRequirements: string[] = [];
@@ -588,6 +644,23 @@ export function evaluateHematologicRisk(measurements: MeasurementRecord[]): Risk
         ['Hemoglobin', 'Platelet Count', 'WBC']
       ),
       data_quality: 'INSUFFICIENT',
+      rule_version: RISK_RULE_VERSION
+    };
+  }
+
+  const hemObs = [hb, plt, wbc, pcv].filter(Boolean) as ParsedObservation[];
+  if (hemObs.some(o => o.validationStatus && o.validationStatus !== 'VALIDATED')) {
+    return {
+      domain: 'hematologic',
+      level: 'GREY',
+      label: 'Unreliable Data',
+      evidence: buildEvidenceJson(
+        'One or more hematologic measurements have not been validated.',
+        'Review and validate pending clinical measurements before computing risk assessment.',
+        [],
+        ['Validated Measurements']
+      ),
+      data_quality: 'UNRELIABLE',
       rule_version: RISK_RULE_VERSION
     };
   }

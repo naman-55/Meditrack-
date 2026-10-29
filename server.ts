@@ -49,10 +49,27 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin) || origin.includes('run.app')) {
-      return callback(null, true);
+    // Allow non-browser requests or same-origin where origin header is not set
+    if (!origin) return callback(null, true);
+
+    try {
+      const parsed = new URL(origin);
+      const normalizedOrigin = parsed.origin;
+
+      // Exact match against authorized origins
+      if (allowedOrigins.includes(normalizedOrigin)) {
+        return callback(null, true);
+      }
+
+      // Exact Google Cloud Run authorized domains (*.run.app)
+      if (parsed.protocol === 'https:' && (parsed.hostname.endsWith('.run.app') || parsed.hostname === 'run.app')) {
+        return callback(null, true);
+      }
+
+      return callback(new Error(`CORS origin not allowed: ${origin}`));
+    } catch {
+      return callback(new Error(`Malformed CORS origin: ${origin}`));
     }
-    return callback(new Error(`CORS origin not allowed: ${origin}`));
   },
   credentials: true
 }));
@@ -118,6 +135,7 @@ async function initDb() {
   const resolvedDbPath = path.resolve(process.cwd(), 'meditrack_new.db');
   console.log(`[Database] Initializing database at: ${resolvedDbPath}`);
   try {
+    await db.execute('PRAGMA foreign_keys = ON;');
     await db.execute(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

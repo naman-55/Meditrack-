@@ -131,10 +131,13 @@ function getValidatedConfig(): AppEnvConfig {
   const isMapsConfigured = rawMapsKey.length > 0 && !rawMapsKey.includes('your-');
 
   // Web Push VAPID Configuration
-  const vapidPublicKey = (process.env.VAPID_PUBLIC_KEY || 'BLIBxJOLLsQgUWbPBZ_wN57YKWusriSo9vH5uI3n4JPq2BttdjuUuhn8Lelm6EUhzc39oASBMTqNQP3qDtch6G0').trim();
-  const vapidPrivateKey = (process.env.VAPID_PRIVATE_KEY || '0bZT9N8NwIMcLipvYogo0vJIqrLR0AQqiGluRqXORNo').trim();
+  const vapidPublicKey = (process.env.VAPID_PUBLIC_KEY || '').trim();
+  const vapidPrivateKey = (process.env.VAPID_PRIVATE_KEY || '').trim();
   const vapidSubject = (process.env.VAPID_SUBJECT || 'mailto:support@meditrack.health').trim();
-  const isPushConfigured = vapidPublicKey.length > 20 && vapidPrivateKey.length > 20;
+  const isPushConfigured = vapidPublicKey.length > 20 && 
+                           vapidPrivateKey.length > 20 && 
+                           !vapidPublicKey.includes('your-') && 
+                           !vapidPrivateKey.includes('your-');
 
   // Telegram Bot Configuration
   const telegramBotToken = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
