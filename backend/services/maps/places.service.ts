@@ -478,7 +478,19 @@ export class PlacesService {
     });
   }
 
-  private static httpPostJson(urlStr: string, payload: string, headers: Record<string, string>): Promise<any> {
+  private static async httpPostJson(urlStr: string, payload: string, headers: Record<string, string>): Promise<any> {
+    const maxRetries = 1;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const res = await PlacesService.singleHttpPostJson(urlStr, payload, headers);
+      if (res !== null) return res;
+      if (attempt < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, 350));
+      }
+    }
+    return null;
+  }
+
+  private static singleHttpPostJson(urlStr: string, payload: string, headers: Record<string, string>): Promise<any> {
     return new Promise((resolve) => {
       try {
         const parsed = new URL(urlStr);
@@ -490,7 +502,7 @@ export class PlacesService {
             ...headers,
             'Content-Length': Buffer.byteLength(payload)
           },
-          timeout: 8000
+          timeout: 7000
         }, (res) => {
           let body = '';
           res.on('data', chunk => body += chunk);
@@ -499,10 +511,10 @@ export class PlacesService {
               if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
                 resolve(JSON.parse(body));
               } else {
-                console.warn('Google Places API POST responded with status:', res.statusCode, body.slice(0, 200));
+                console.warn('[Google Places API] Notice: HTTP response status', res.statusCode);
                 resolve(null);
               }
-            } catch (e) {
+            } catch {
               resolve(null);
             }
           });
@@ -515,14 +527,14 @@ export class PlacesService {
 
         req.on('error', (err) => {
           if (!req.destroyed) {
-            console.warn('Google Places API POST request failed:', err.message);
+            console.warn('[Google Places API] Connection notice (service temporarily unavailable):', err.message);
           }
           resolve(null);
         });
 
         req.write(payload);
         req.end();
-      } catch (err) {
+      } catch {
         resolve(null);
       }
     });

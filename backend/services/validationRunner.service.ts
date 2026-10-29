@@ -437,6 +437,81 @@ export async function runSoftwareValidationSuite(): Promise<SoftwareValidationRe
     }
   );
 
+  // 15. NOTIFICATIONS: E.164 Phone Normalization & Email RFC Validation
+  await runTest(
+    'NOTIF-01',
+    'Notifications & Alerts',
+    'Recipient Normalization & Channel Validation',
+    'Verifies international E.164 telephone number standardization and email format validation.',
+    'Valid email accepted; invalid rejected. Phone converted to E.164 format with country code.',
+    async () => {
+      const { isValidEmail, normalizePhoneToE164 } = await import('./notifications/providers.js');
+      const validEmail = isValidEmail('doctor.smith@clinic.org');
+      const invalidEmail = isValidEmail('not-an-email');
+      const normalizedPhone = normalizePhoneToE164('+1 (555) 892-1140');
+      const invalidPhone = normalizePhoneToE164('123');
+
+      const passed = validEmail === true && 
+                     invalidEmail === false && 
+                     normalizedPhone === '+15558921140' && 
+                     invalidPhone === null;
+
+      return {
+        actual: `Valid email: ${validEmail}; Invalid rejected: ${!invalidEmail}; E.164 phone: ${normalizedPhone}; Short phone rejected: ${invalidPhone === null}`,
+        passed
+      };
+    }
+  );
+
+  // 16. NOTIFICATIONS: Canonical Summary & Channel Format Generation
+  await runTest(
+    'NOTIF-02',
+    'Notifications & Alerts',
+    'Consolidated Health Summary & Formatting',
+    'Verifies creation of unified canonical health summary and multi-channel formatting (Email HTML, concise SMS, and Push).',
+    'Complete HTML email with abnormal biomarker table, SMS with secure link, and privacy-conscious push payload generated.',
+    async () => {
+      const { formatEmailHtml, formatSms, formatPush, MEDICAL_DISCLAIMER } = await import('./notifications/canonicalSummary.js');
+      const mockSummary = {
+        alertId: 9001,
+        patientId: 'P-0001',
+        patientName: 'Leo Martinez',
+        timestamp: new Date().toISOString(),
+        severity: 'HIGH' as const,
+        title: 'High-Priority Health Alert',
+        mainReason: 'Elevated blood pressure and HbA1c detected in clinical lab panel.',
+        abnormalFindings: [
+          { parameter: 'Blood Pressure', measuredValue: '165/102', unit: 'mmHg', referenceRange: '<120/80 mmHg', status: 'High' as const },
+          { parameter: 'HbA1c', measuredValue: '9.1', unit: '%', referenceRange: '4.0 - 5.6%', status: 'Critical' as const }
+        ],
+        historicalChanges: [],
+        documentedRiskFactors: [],
+        explanation: 'Stage 2 hypertension and glycemic threshold exceeded.',
+        limitations: 'Laboratory extracted metrics.',
+        recommendedActions: ['Consult primary care physician promptly.'],
+        secureLink: 'http://localhost:3000/family-alerts?alertId=9001',
+        disclaimer: MEDICAL_DISCLAIMER
+      };
+
+      const html = formatEmailHtml(mockSummary);
+      const sms = formatSms(mockSummary);
+      const push = formatPush(mockSummary);
+
+      const passed = html.includes('MediTrack') &&
+                     html.includes('165/102') &&
+                     html.includes('9.1') &&
+                     sms.includes('HIGH alert for Patient P-0001') &&
+                     sms.includes('http://localhost:3000/family-alerts?alertId=9001') &&
+                     push.title === 'MediTrack HIGH Health Alert' &&
+                     push.data.alertId === 9001;
+
+      return {
+        actual: `Email HTML length: ${html.length} chars; SMS: "${sms.slice(0, 60)}..."; Push title: "${push.title}"`,
+        passed
+      };
+    }
+  );
+
   const passedCount = testCases.filter(t => t.status === 'PASSED').length;
   const failedCount = testCases.filter(t => t.status === 'FAILED').length;
   const skippedCount = testCases.filter(t => t.status === 'SKIPPED').length;

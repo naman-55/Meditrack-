@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Header from './Header';
+import InAppAlertModal from './InAppAlertModal';
 import { Menu } from 'lucide-react';
 import { cn } from '../utils/cn';
 
@@ -41,6 +42,9 @@ export default function Layout() {
           )}
         </main>
       </div>
+
+      {/* Real-Time Clinical In-App Pop-Up Alert Modal */}
+      <InAppAlertModal />
     </div>
   );
 }

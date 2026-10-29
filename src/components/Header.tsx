@@ -17,17 +17,21 @@ import {
   Clock,
   Sparkles,
   Sun,
-  Moon
+  Moon,
+  AlertTriangle
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '../utils/cn';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
-import { apiClient } from '../api/client';
+import { apiClient, getAccessToken } from '../api/client';
+import { notificationService } from '../api/notifications';
 
 interface AlertItem {
   id: number;
   type: string;
+  title?: string;
+  severity?: string;
   message: string;
   source: string;
   status: string;
@@ -70,7 +74,9 @@ export default function Header({ onMenuClick }: HeaderProps) {
   const [showNotifications, setShowNotifications] = useState(false);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [isLoadingAlerts, setIsLoadingAlerts] = useState(false);
+  const [toastAlert, setToastAlert] = useState<AlertItem | null>(null);
   const notifContainerRef = useRef<HTMLDivElement>(null);
+  const seenAlertIdsRef = useRef<Set<number>>(new Set());
 
   // Profile Menu State
   const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -79,11 +85,21 @@ export default function Header({ onMenuClick }: HeaderProps) {
   // Fetch Alerts
   const fetchAlerts = async () => {
     try {
-      setIsLoadingAlerts(true);
-      const token = localStorage.getItem('token');
+      const token = getAccessToken();
       if (!token) return;
       const data = await apiClient.get('/api/alerts');
-      setAlerts(Array.isArray(data) ? data : []);
+      const list: AlertItem[] = Array.isArray(data) ? data : [];
+      setAlerts(list);
+
+      // Check for newly arrived unread alerts to trigger in-app toast banner
+      const unreadAlerts = list.filter(a => !a.is_read);
+      for (const alert of unreadAlerts) {
+        if (!seenAlertIdsRef.current.has(alert.id)) {
+          seenAlertIdsRef.current.add(alert.id);
+          setToastAlert(alert);
+          break; // Show one active toast banner at a time
+        }
+      }
     } catch {
       // Gracefully ignore transient alert fetch failures in background polling
     } finally {
@@ -93,10 +109,19 @@ export default function Header({ onMenuClick }: HeaderProps) {
 
   useEffect(() => {
     fetchAlerts();
-    // Poll every 45s for updates
-    const interval = setInterval(fetchAlerts, 45000);
-    return () => clearInterval(interval);
-  }, []);
+    // Poll every 12 seconds for responsive in-app alert updates
+    const interval = setInterval(fetchAlerts, 12000);
+
+    const handleAlertCreated = () => {
+      fetchAlerts();
+    };
+    window.addEventListener('meditrack:alert-created', handleAlertCreated);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('meditrack:alert-created', handleAlertCreated);
+    };
+  }, [user?.id]);
 
   // Debounced Global Search
   useEffect(() => {
@@ -392,68 +417,185 @@ export default function Header({ onMenuClick }: HeaderProps) {
                     <span>Checking health alerts...</span>
                   </div>
                 ) : alerts.length === 0 ? (
-                  <div className="py-8 px-4 text-center text-xs text-[#64748B] dark:text-[#7186A3] space-y-1">
-                    <p className="font-bold text-[#071B49] dark:text-[#F1F5FB]">No active clinical alerts</p>
-                    <p>Alerts are generated when notable risk markers or updates are detected.</p>
+                  <div className="py-8 px-4 text-center text-xs text-[#64748B] dark:text-[#7186A3] space-y-3">
+                    <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-[#102033] flex items-center justify-center mx-auto text-slate-400 dark:text-[#7186A3]">
+                      <Bell className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-[#071B49] dark:text-[#F1F5FB]">No active clinical alerts</p>
+                      <p className="text-[11px] mt-0.5">Alerts appear automatically when risk markers or abnormal reports are detected.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        try {
+                          await notificationService.triggerInAppTestAlert({
+                            title: 'Elevated Biomarker Alert',
+                            message: 'Fasting blood glucose 138 mg/dL and HbA1c 6.8% detected in recent metabolic panel.',
+                            severity: 'HIGH'
+                          });
+                          window.dispatchEvent(new CustomEvent('meditrack:alert-created'));
+                        } catch (err) {
+                          console.error('Trigger sample alert failed:', err);
+                        }
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-[#00A884] hover:bg-[#008f72] text-white transition-colors shadow-xs"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Send Sample In-App Alert</span>
+                    </button>
                   </div>
                 ) : (
-                  alerts.map((alert) => (
-                    <div 
-                      key={alert.id}
-                      onClick={() => markAlertAsRead(alert.id)}
-                      className={cn(
-                        "p-3.5 text-xs transition-colors cursor-pointer flex items-start gap-3",
-                        alert.is_read 
-                          ? "bg-white hover:bg-[#F8FAFC] dark:bg-[#0D1B2A] dark:hover:bg-[#14283B]" 
-                          : "bg-[#F0FDF9] hover:bg-[#E8FAF4] dark:bg-[#102033] dark:hover:bg-[#14283B]"
-                      )}
-                    >
-                      <div className={cn(
-                        "p-2 rounded-xl shrink-0 mt-0.5",
-                        alert.type?.toLowerCase().includes('critical') || alert.type?.toLowerCase().includes('emergency')
-                          ? "bg-[#FFF0F3] text-[#EF476F] dark:bg-[#FF5368]/15 dark:text-[#FF5368]"
-                          : "bg-[#E8FAF4] text-[#00A884] dark:bg-[#00D6B0]/15 dark:text-[#00D6B0]"
-                      )}>
-                        <ShieldAlert className="w-4 h-4" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="font-bold text-[#071B49] dark:text-[#F1F5FB] text-xs truncate">
-                            {alert.type === 'REPORT_PROCESSED' ? 'Report processing complete' : alert.type || 'Health Notification'}
-                          </span>
-                          <span className="text-[10px] text-[#64748B] dark:text-[#7186A3] shrink-0">
-                            {alert.created_at ? new Date(alert.created_at).toLocaleDateString() : 'Recent'}
-                          </span>
+                  alerts.map((alert) => {
+                    const isCritical = alert.severity === 'CRITICAL' || alert.type?.toLowerCase().includes('critical') || alert.type?.toLowerCase().includes('emergency');
+                    const isHigh = alert.severity === 'HIGH' || alert.type?.toLowerCase().includes('high');
+                    const alertSeverity = alert.severity || (isCritical ? 'CRITICAL' : isHigh ? 'HIGH' : 'MODERATE');
+
+                    return (
+                      <div 
+                        key={alert.id}
+                        onClick={() => {
+                          markAlertAsRead(alert.id);
+                          setShowNotifications(false);
+                          navigate(`/family-alerts?alertId=${alert.id}`);
+                        }}
+                        className={cn(
+                          "p-3.5 text-xs transition-colors cursor-pointer flex items-start gap-3",
+                          alert.is_read 
+                            ? "bg-white hover:bg-[#F8FAFC] dark:bg-[#0D1B2A] dark:hover:bg-[#14283B]" 
+                            : "bg-[#F0FDF9] hover:bg-[#E8FAF4] dark:bg-[#102033] dark:hover:bg-[#14283B]"
+                        )}
+                      >
+                        <div className={cn(
+                          "p-2 rounded-xl shrink-0 mt-0.5",
+                          isCritical
+                            ? "bg-[#FFF0F3] text-[#EF476F] dark:bg-[#FF5368]/15 dark:text-[#FF5368]"
+                            : isHigh
+                            ? "bg-orange-50 text-orange-600 dark:bg-orange-950/40 dark:text-orange-400"
+                            : "bg-[#E8FAF4] text-[#00A884] dark:bg-[#00D6B0]/15 dark:text-[#00D6B0]"
+                        )}>
+                          <ShieldAlert className="w-4 h-4" />
                         </div>
-                        <p className="text-[#64748B] dark:text-[#A6B8CF] mt-0.5 leading-relaxed line-clamp-2">
-                          {alert.message}
-                        </p>
-                        <div className="flex items-center gap-2 mt-1.5 text-[10px] text-[#64748B] dark:text-[#7186A3]">
-                          <span>Source: {alert.source || 'Clinical System'}</span>
-                          <span>&middot;</span>
-                          <span className="font-semibold text-[#008F72] dark:text-[#00D6B0] uppercase">{alert.status || 'DELIVERED'}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-1 mb-0.5">
+                            <span className="font-bold text-[#071B49] dark:text-[#F1F5FB] text-xs truncate">
+                              {alert.title || (alert.type === 'REPORT_PROCESSED' ? 'Medical Report Processed' : alert.type?.replace(/_/g, ' ')) || 'Health Notification'}
+                            </span>
+                            <span className={cn(
+                              "text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0",
+                              isCritical 
+                                ? "bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-400"
+                                : isHigh 
+                                ? "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400"
+                                : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400"
+                            )}>
+                              {alertSeverity}
+                            </span>
+                          </div>
+                          <p className="text-[#64748B] dark:text-[#A6B8CF] leading-relaxed line-clamp-2">
+                            {alert.message}
+                          </p>
+                          <div className="flex items-center gap-2 mt-1.5 text-[10px] text-[#64748B] dark:text-[#7186A3]">
+                            <span>{alert.created_at ? new Date(alert.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Recent'}</span>
+                            <span>&middot;</span>
+                            <span>{alert.source || 'Clinical System'}</span>
+                          </div>
                         </div>
+                        {!alert.is_read && (
+                          <span className="w-2 h-2 rounded-full bg-[#00A884] dark:bg-[#00D6B0] shrink-0 mt-2"></span>
+                        )}
                       </div>
-                      {!alert.is_read && (
-                        <span className="w-2 h-2 rounded-full bg-[#00A884] dark:bg-[#00D6B0] shrink-0 mt-2"></span>
-                      )}
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
 
-              <div className="p-3 border-t border-[#DCE5EC] dark:border-[#20364A] bg-[#F8FAFC] dark:bg-[#102033] text-center">
+              <div className="p-3 border-t border-[#DCE5EC] dark:border-[#20364A] bg-[#F8FAFC] dark:bg-[#102033] flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await notificationService.triggerInAppTestAlert();
+                      window.dispatchEvent(new CustomEvent('meditrack:alert-created'));
+                    } catch (err) {
+                      console.error('Test alert trigger error:', err);
+                    }
+                  }}
+                  className="text-[11px] font-semibold text-[#00A884] dark:text-[#00D6B0] hover:underline flex items-center gap-1"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  <span>Test In-App Alert</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => { setShowNotifications(false); navigate('/family-alerts'); }}
                   className="text-xs font-semibold text-[#2563EB] dark:text-[#4BA3FF] hover:underline"
                 >
-                  Manage Emergency Contacts &amp; Alert Rules &rarr;
+                  Manage Rules &rarr;
                 </button>
               </div>
             </div>
           )}
         </div>
+
+        {/* Real-time Floating In-App Toast Notification Banner */}
+        {toastAlert && (
+          <div className="fixed top-20 right-4 sm:right-8 z-50 max-w-sm sm:max-w-md bg-white dark:bg-[#0D1B2A] border-2 border-[#EF476F] dark:border-[#FF5368] rounded-2xl shadow-2xl p-4 flex items-start gap-3.5 animate-in slide-in-from-top-4 duration-300 ring-4 ring-[#EF476F]/10">
+            <div className={cn(
+              "p-2.5 rounded-xl shrink-0 mt-0.5",
+              toastAlert.severity === 'CRITICAL'
+                ? "bg-rose-100 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400"
+                : "bg-amber-100 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400"
+            )}>
+              <ShieldAlert className="w-5 h-5 animate-pulse" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-1">
+                <span className="font-bold text-[10px] tracking-wider uppercase text-rose-700 dark:text-rose-400">
+                  {toastAlert.severity || 'Clinical Alert'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setToastAlert(null)}
+                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                  title="Dismiss notification"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <h4 className="font-bold text-xs text-[#071B49] dark:text-[#F1F5FB] mt-0.5 truncate">
+                {toastAlert.title || (toastAlert.type === 'REPORT_PROCESSED' ? 'Medical Report Processed' : toastAlert.type) || 'Health Notification'}
+              </h4>
+              <p className="text-[11px] text-[#64748B] dark:text-[#A6B8CF] mt-1 line-clamp-2 leading-relaxed">
+                {toastAlert.message}
+              </p>
+              <div className="mt-2.5 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    markAlertAsRead(toastAlert.id);
+                    setToastAlert(null);
+                    navigate(`/family-alerts?alertId=${toastAlert.id}`);
+                  }}
+                  className="px-2.5 py-1 bg-[#00A884] hover:bg-[#008f72] text-white text-[11px] font-bold rounded-lg transition-colors shadow-xs"
+                >
+                  View Details
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    markAlertAsRead(toastAlert.id);
+                    setToastAlert(null);
+                  }}
+                  className="text-[11px] font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                >
+                  Mark as Read
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Theme Toggle Button */}
         <button

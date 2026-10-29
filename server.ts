@@ -30,6 +30,9 @@ import { authService, generateAccessToken } from './backend/services/auth.servic
 import { db } from './backend/db/db.js';
 import { aiService, GeminiAIError } from './backend/services/ai.service.js';
 import { generateSpecialtyGuidance, calculateHealthSnapshot } from './backend/services/specialtyGuidance.service.js';
+import { notificationsRouter } from './backend/routes/notifications.routes.js';
+import { initNotificationSchema, validateDatabaseSchema } from './backend/services/notifications/dbSchema.js';
+import { createAndDispatchHealthAlert } from './backend/services/notifications/dispatcher.js';
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
@@ -106,9 +109,12 @@ const upload = multer({
 app.use(express.json({ limit: '2mb' }));
 app.use(cookieParser());
 app.use('/api/specialists', specialistsRouter);
+app.use('/api/notifications', notificationsRouter);
 
 // Initialize DB schema
 async function initDb() {
+  const resolvedDbPath = path.resolve(process.cwd(), 'meditrack_new.db');
+  console.log(`[Database] Initializing database at: ${resolvedDbPath}`);
   try {
     await db.execute(`
     CREATE TABLE IF NOT EXISTS users (
@@ -506,6 +512,19 @@ async function initDb() {
 
     for (const stmt of indexStatements) {
       try { await db.execute(stmt); } catch(e) {}
+    }
+
+    // Initialize notification outbox, delivery tracking, and push subscription schema
+    try {
+      await initNotificationSchema(db);
+      const schemaCheck = await validateDatabaseSchema(db);
+      if (!schemaCheck.valid) {
+        console.error('[Schema Warning] Missing database components:', schemaCheck.missing);
+      } else {
+        console.log(`[Schema Verified] Database schema v${schemaCheck.userVersion} verified successfully.`);
+      }
+    } catch(e) {
+      console.warn('Notification schema migration notice:', e);
     }
 
     // Seed default demo facilities for local testing if table is empty (Phase 16)
@@ -1029,7 +1048,7 @@ const handleGetProfile = async (req: any, res: any) => {
     const result = await db.execute({
       sql: `SELECT id, email, name, role, status, phone, date_of_birth, gender, blood_group,
                    height_cm, weight_kg, emergency_contact_name, emergency_contact_relationship, emergency_contact_phone,
-                   notification_email, notification_sms, notification_push,
+                   notification_email, notification_sms, notification_telegram, notification_push,
                    notification_health_reminders, notification_lab_report_alerts, notification_frequency
             FROM users WHERE id = ?`,
       args: [req.user.id]
@@ -1062,6 +1081,7 @@ const handleUpdateProfile = async (req: any, res: any) => {
 
   const notifEmail = body.notification_email;
   const notifSms = body.notification_sms;
+  const notifTelegram = body.notification_telegram;
   const notifPush = body.notification_push;
   const notifHealthReminders = body.notification_health_reminders;
   const notifLabReportAlerts = body.notification_lab_report_alerts;
@@ -1070,6 +1090,7 @@ const handleUpdateProfile = async (req: any, res: any) => {
   for (const [label, value] of [
     ['Email notifications', notifEmail],
     ['SMS notifications', notifSms],
+    ['Telegram notifications', notifTelegram],
     ['Push notifications', notifPush],
     ['Health reminders', notifHealthReminders],
     ['Lab report alerts', notifLabReportAlerts]
@@ -1164,6 +1185,7 @@ const handleUpdateProfile = async (req: any, res: any) => {
     const finalEmPhone = emPhone !== undefined ? (emPhone ? emPhone.trim() : null) : current.emergency_contact_phone;
     const finalEmailNotif = notifEmail !== undefined ? (notifEmail ? 1 : 0) : (current.notification_email ?? 1);
     const finalSmsNotif = notifSms !== undefined ? (notifSms ? 1 : 0) : (current.notification_sms ?? 0);
+    const finalTelegramNotif = notifTelegram !== undefined ? (notifTelegram ? 1 : 0) : (current.notification_telegram ?? 1);
     const finalPushNotif = notifPush !== undefined ? (notifPush ? 1 : 0) : (current.notification_push ?? 1);
     const finalHealthReminders = notifHealthReminders !== undefined ? (notifHealthReminders ? 1 : 0) : (current.notification_health_reminders ?? 0);
     const finalLabReportAlerts = notifLabReportAlerts !== undefined ? (notifLabReportAlerts ? 1 : 0) : (current.notification_lab_report_alerts ?? 0);
@@ -1183,6 +1205,7 @@ const handleUpdateProfile = async (req: any, res: any) => {
               emergency_contact_phone = ?,
               notification_email = ?, 
               notification_sms = ?, 
+              notification_telegram = ?,
               notification_push = ?,
               notification_health_reminders = ?,
               notification_lab_report_alerts = ?,
@@ -1201,6 +1224,7 @@ const handleUpdateProfile = async (req: any, res: any) => {
         finalEmPhone,
         finalEmailNotif,
         finalSmsNotif,
+        finalTelegramNotif,
         finalPushNotif,
         finalHealthReminders,
         finalLabReportAlerts,
@@ -1724,22 +1748,69 @@ app.post('/api/reports/upload', authenticateToken, uploadRateLimiter, upload.sin
     });
     report.processing_status = 'COMPLETED';
 
+    // Evaluate extracted biomarkers to determine alert severity and create canonical alert
     try {
-      await db.execute({
-        sql: `INSERT OR IGNORE INTO health_alerts
-                (user_id, contact_id, type, message, source, status, delivery_channel, event_key, is_read, created_at)
-              VALUES (?, NULL, ?, ?, ?, 'RECORDED', 'IN_APP', ?, 0, ?)`,
-        args: [
-          req.user.id,
-          'REPORT_PROCESSED',
-          'A report finished processing. Sign in to MediTrack to review the results.',
-          'Medical Report Processing',
-          `report-processed:${report.id}`,
-          new Date().toISOString()
-        ]
+      let alertSeverity: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL' = 'MODERATE';
+      let alertTitle = 'Medical Report Processed';
+      let mainReason = `Medical report "${report.filename}" was successfully analyzed.`;
+      const abnormalFlags: string[] = [];
+
+      for (const m of parsedMeasurements) {
+        const p = (m.parameter || '').toLowerCase();
+        const v = (m.normalized_value || m.raw_value || '').trim();
+        const num = parseFloat(v.replace(/,/g, ''));
+        if (p.includes('blood pressure') || p.includes('bp')) {
+          const parts = v.split('/');
+          if (parts.length === 2) {
+            const sys = parseInt(parts[0], 10);
+            const dia = parseInt(parts[1], 10);
+            if (sys >= 140 || dia >= 90) {
+              const isCrit = sys >= 180 || dia >= 120;
+              alertSeverity = isCrit ? 'CRITICAL' : 'HIGH';
+              abnormalFlags.push(`BP ${v} mmHg (${isCrit ? 'Critical Stage 3' : 'Stage 2 Hypertension'})`);
+            }
+          }
+        } else if (p === 'hba1c' || p.includes('glycated')) {
+          if (!isNaN(num) && num >= 6.5) {
+            if (num >= 9.0) alertSeverity = 'CRITICAL';
+            else if (alertSeverity !== 'CRITICAL') alertSeverity = 'HIGH';
+            abnormalFlags.push(`HbA1c ${num}% (Elevated)`);
+          }
+        } else if (p.includes('glucose') && (num >= 126 || num < 70)) {
+          if (num >= 200 || num < 55) alertSeverity = 'CRITICAL';
+          else if (alertSeverity !== 'CRITICAL') alertSeverity = 'HIGH';
+          abnormalFlags.push(`Glucose ${num} mg/dL`);
+        } else if (p === 'ldl' && num >= 160) {
+          if (alertSeverity !== 'CRITICAL') alertSeverity = 'HIGH';
+          abnormalFlags.push(`LDL ${num} mg/dL`);
+        }
+      }
+
+      if (abnormalFlags.length > 0) {
+        alertTitle = `${alertSeverity === 'CRITICAL' ? 'Critical' : 'High-Priority'} Health Alert`;
+        mainReason = `Automated analysis of ${report.filename} identified: ${abnormalFlags.join(', ')}.`;
+      }
+
+      // Check for duplicate alert by event_key before inserting
+      const eventKey = `report-processed:${report.id}`;
+      const existingAlert = await db.execute({
+        sql: 'SELECT id FROM health_alerts WHERE user_id = ? AND event_key = ?',
+        args: [req.user.id, eventKey]
       });
+
+      if (existingAlert.rows.length === 0) {
+        await createAndDispatchHealthAlert(db, {
+          userId: req.user.id,
+          severity: alertSeverity,
+          title: alertTitle,
+          mainReason,
+          source: 'Medical Report Processing',
+          sourceReportId: Number(report.id),
+          eventKey
+        });
+      }
     } catch (alertError) {
-      console.warn('Could not record the report processing notification');
+      console.warn('Could not record or dispatch the report processing notification:', alertError);
     }
 
     // Invalidate analysis cache and refresh specialty guidance for newly processed report
@@ -2214,6 +2285,35 @@ app.post('/api/risk/analyze', authenticateToken, aiRateLimiter, async (req: any,
       args: [req.user.id, risk.domain, risk.level, risk.label, risk.evidence, risk.data_quality, risk.rule_version, now]
     });
     assessmentsCreated.push(insertResult.rows[0]);
+  }
+
+  // Automatically trigger qualifying health alert if RED or ORANGE risk detected
+  const highRisks = riskResults.filter(r => r.level === 'RED' || r.level === 'ORANGE');
+  if (highRisks.length > 0) {
+    try {
+      const worstLevel = highRisks.some(r => r.level === 'RED') ? 'CRITICAL' : 'HIGH';
+      const domainNames = highRisks.map(r => r.domain).join(' & ');
+      const todayDate = now.split('T')[0];
+      const riskKey = `risk-alert:${req.user.id}:${worstLevel}:${todayDate}`;
+
+      const existingAlert = await db.execute({
+        sql: 'SELECT id FROM health_alerts WHERE user_id = ? AND event_key = ?',
+        args: [req.user.id, riskKey]
+      });
+
+      if (existingAlert.rows.length === 0) {
+        await createAndDispatchHealthAlert(db, {
+          userId: req.user.id,
+          severity: worstLevel,
+          title: `${worstLevel === 'CRITICAL' ? 'Critical' : 'Elevated'} Clinical Risk (${domainNames})`,
+          mainReason: `Risk assessment calculated ${worstLevel.toLowerCase()} priority indicators in ${domainNames} domain.`,
+          source: 'Clinical Risk Assessment',
+          eventKey: riskKey
+        });
+      }
+    } catch (riskAlertErr) {
+      console.warn('Risk alert dispatch notice:', riskAlertErr);
+    }
   }
 
   res.json({ message: 'Risk assessment complete', risks: assessmentsCreated });
@@ -3307,7 +3407,7 @@ app.put('/api/admin/facilities/:id', authenticateToken, requireRole('ADMIN'), as
 });
 
 
-// --- TRUSTED CONTACTS & ALERTS ROUTES (PHASE 12 & 13) ---
+// --- TRUSTED CONTACTS & ALERTS ROUTES (PHASE 12, 13 & REAL NOTIFICATION INTEGRATION) ---
 
 function buildTrustedContactValues(body: any, current?: any) {
   const nameRaw = body.name !== undefined ? body.name : current?.name;
@@ -3315,47 +3415,82 @@ function buildTrustedContactValues(body: any, current?: any) {
   const methodRaw = body.contact_method !== undefined ? body.contact_method : current?.contact_method;
   const valueRaw = body.contact_value !== undefined ? body.contact_value : current?.contact_value;
   const statusRaw = body.status !== undefined ? body.status : (current?.status || 'ACTIVE');
-  const errors: Record<string, string> = {};
 
+  const emailRaw = body.email !== undefined ? body.email : (current?.email || (methodRaw === 'EMAIL' ? valueRaw : ''));
+  const phoneRaw = body.phone !== undefined ? body.phone : (current?.phone || (['SMS', 'PHONE'].includes(methodRaw) ? valueRaw : ''));
+  const emailEnabledRaw = body.email_enabled !== undefined ? body.email_enabled : (current?.email_enabled !== undefined ? current.email_enabled : 1);
+  const smsEnabledRaw = body.sms_enabled !== undefined ? body.sms_enabled : (current?.sms_enabled !== undefined ? current.sms_enabled : 1);
+  const consentStatusRaw = body.consent_status !== undefined ? body.consent_status : (current?.consent_status || 'GRANTED');
+
+  const errors: Record<string, string> = {};
   const name = typeof nameRaw === 'string' ? nameRaw.trim() : '';
   const relationship = typeof relationshipRaw === 'string' ? relationshipRaw.trim() : '';
   let contactMethod = typeof methodRaw === 'string' ? methodRaw.trim().toUpperCase() : '';
-  const status = typeof statusRaw === 'string' ? statusRaw.trim().toUpperCase() : '';
-  const contactInput = typeof valueRaw === 'string' ? valueRaw.trim() : '';
+  const status = typeof statusRaw === 'string' ? statusRaw.trim().toUpperCase() : 'ACTIVE';
 
   if (contactMethod === 'PHONE') contactMethod = 'SMS';
+
   if (!name) errors.name = 'Enter the contact’s full name.';
   else if (name.length > 100) errors.name = 'Name must be 100 characters or fewer.';
-  if (!relationship) errors.relationship = 'Enter the contact’s relationship.';
+  if (!relationship) errors.relationship = 'Enter the relationship.';
   else if (relationship.length > 80) errors.relationship = 'Relationship must be 80 characters or fewer.';
-  if (!['EMAIL', 'SMS'].includes(contactMethod)) errors.contact_method = 'Choose email or SMS/phone.';
   if (!['ACTIVE', 'DISABLED', 'INACTIVE'].includes(status)) errors.status = 'Choose a valid contact status.';
 
-  let contactValue = contactInput;
-  if (contactMethod === 'EMAIL') {
-    contactValue = contactInput.toLowerCase();
-    if (!contactValue) errors.contact_value = 'Enter an email address.';
-    else if (contactValue.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactValue)) errors.contact_value = 'Enter a valid email address.';
-  } else if (contactMethod === 'SMS') {
-    const digits = contactInput.replace(/\D/g, '');
-    if (!contactInput) errors.contact_value = 'Enter a phone number.';
-    else if (!/^\+?[\d\s().-]+$/.test(contactInput) || digits.length < 7 || digits.length > 15) errors.contact_value = 'Enter a valid phone number with 7 to 15 digits.';
-    else contactValue = contactInput.startsWith('+') ? `+${digits}` : digits;
+  let email = typeof emailRaw === 'string' ? emailRaw.trim().toLowerCase() : '';
+  let phone = typeof phoneRaw === 'string' ? phoneRaw.trim() : '';
+
+  if (email) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
+      errors.email = 'Enter a valid email address.';
+    }
   }
+
+  if (phone) {
+    const digits = phone.replace(/\D/g, '');
+    if (!/^\+?[\d\s().-]+$/.test(phone) || digits.length < 7 || digits.length > 15) {
+      errors.phone = 'Enter a valid phone number with 7 to 15 digits.';
+    } else {
+      phone = phone.startsWith('+') ? `+${digits}` : `+${digits}`;
+    }
+  }
+
+  // Legacy fallback if valueRaw provided but email/phone empty
+  if (!email && !phone) {
+    const val = typeof valueRaw === 'string' ? valueRaw.trim() : '';
+    if (contactMethod === 'EMAIL') {
+      if (!val || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) errors.email = 'Enter a valid email address.';
+      else email = val.toLowerCase();
+    } else {
+      const digits = val.replace(/\D/g, '');
+      if (!val || digits.length < 7 || digits.length > 15) errors.phone = 'Enter a valid phone number with 7 to 15 digits.';
+      else phone = val.startsWith('+') ? `+${digits}` : `+${digits}`;
+    }
+  }
+
+  if (!email && !phone) {
+    errors.contact_value = 'Provide at least a valid email address or phone number.';
+  }
+
+  const primaryValue = email || phone || '';
+  const primaryMethod = email ? 'EMAIL' : 'SMS';
+  const telegramEnabledRaw = body.telegram_enabled !== undefined ? body.telegram_enabled : (current?.telegram_enabled !== undefined ? current.telegram_enabled : 1);
 
   return {
     errors,
-    values: { name, relationship, contact_method: contactMethod, contact_value: contactValue, status: status === 'INACTIVE' ? 'DISABLED' : status }
+    values: {
+      name,
+      relationship,
+      contact_method: contactMethod || primaryMethod,
+      contact_value: primaryValue,
+      email: email || null,
+      phone: phone || null,
+      email_enabled: emailEnabledRaw ? 1 : 0,
+      sms_enabled: 0,
+      telegram_enabled: telegramEnabledRaw !== undefined ? (telegramEnabledRaw ? 1 : 0) : (current?.telegram_enabled ?? 1),
+      consent_status: consentStatusRaw === 'REVOKED' ? 'REVOKED' : 'GRANTED',
+      status: ['DISABLED', 'INACTIVE'].includes(status) ? 'DISABLED' : 'ACTIVE'
+    }
   };
-}
-
-function trustedContactDuplicateKey(method: string, value: string) {
-  return method === 'EMAIL' ? value.trim().toLowerCase() : value.replace(/\D/g, '');
-}
-
-function trustedContactMethod(method: unknown) {
-  const normalized = String(method || '').toUpperCase();
-  return normalized === 'PHONE' ? 'SMS' : normalized;
 }
 
 app.get('/api/contacts', authenticateToken, async (req: any, res: any) => {
@@ -3366,7 +3501,7 @@ app.get('/api/contacts', authenticateToken, async (req: any, res: any) => {
     });
     res.json(result.rows);
   } catch (error) {
-    console.error('Trusted contacts retrieval failed');
+    console.error('Trusted contacts retrieval failed:', error);
     res.status(500).json({ error: 'Unable to retrieve trusted contacts' });
   }
 });
@@ -3375,21 +3510,46 @@ app.post('/api/contacts', authenticateToken, async (req: any, res: any) => {
   try {
     const { errors, values } = buildTrustedContactValues(req.body || {});
     if (Object.keys(errors).length) return res.status(400).json({ error: 'Check the contact details and try again.', fields: errors });
-    const existing = await db.execute({ sql: 'SELECT id, contact_method, contact_value FROM trusted_contacts WHERE user_id = ?', args: [req.user.id] });
-    const duplicate = existing.rows.some((contact: any) =>
-      trustedContactMethod(contact.contact_method) === values.contact_method &&
-      trustedContactDuplicateKey(values.contact_method, String(contact.contact_value || '')) === trustedContactDuplicateKey(values.contact_method, values.contact_value)
-    );
-    if (duplicate) return res.status(409).json({ error: 'A contact with this email address or phone number already exists.' });
+
+    const existing = await db.execute({
+      sql: "SELECT id, email, phone, contact_value FROM trusted_contacts WHERE user_id = ? AND status != 'DISABLED'",
+      args: [req.user.id]
+    });
+
+    const duplicate = existing.rows.some((contact: any) => {
+      const emailMatch = values.email && contact.email && contact.email.toLowerCase() === values.email.toLowerCase();
+      const phoneMatch = values.phone && contact.phone && contact.phone.replace(/\D/g, '') === values.phone.replace(/\D/g, '');
+      return emailMatch || phoneMatch;
+    });
+
+    if (duplicate) return res.status(409).json({ error: 'An active contact with this email address or phone number already exists.' });
+
     const now = new Date().toISOString();
     const result = await db.execute({
-      sql: `INSERT INTO trusted_contacts (user_id, name, relationship, contact_method, contact_value, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-      args: [req.user.id, values.name, values.relationship, values.contact_method, values.contact_value, values.status, now, now]
+      sql: `INSERT INTO trusted_contacts 
+            (user_id, name, relationship, contact_method, contact_value, email, phone, email_enabled, sms_enabled, telegram_enabled, consent_status, consent_date, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      args: [
+        req.user.id,
+        values.name,
+        values.relationship,
+        values.contact_method,
+        values.contact_value,
+        values.email,
+        values.phone,
+        values.email_enabled,
+        values.telegram_enabled,
+        values.consent_status,
+        now,
+        values.status,
+        now,
+        now
+      ]
     });
+
     res.status(201).json(result.rows[0]);
   } catch (error) {
-    console.error('Trusted contact creation failed');
+    console.error('Trusted contact creation failed:', error);
     res.status(500).json({ error: 'Unable to save the trusted contact' });
   }
 });
@@ -3398,27 +3558,56 @@ app.put('/api/contacts/:id', authenticateToken, async (req: any, res: any) => {
   try {
     const contactId = Number(req.params.id);
     if (!Number.isSafeInteger(contactId) || contactId <= 0) return res.status(400).json({ error: 'Invalid contact ID' });
-    const currentResult = await db.execute({ sql: 'SELECT * FROM trusted_contacts WHERE id = ? AND user_id = ?', args: [contactId, req.user.id] });
+
+    const currentResult = await db.execute({
+      sql: 'SELECT * FROM trusted_contacts WHERE id = ? AND user_id = ?',
+      args: [contactId, req.user.id]
+    });
     const current = currentResult.rows[0];
     if (!current) return res.status(404).json({ error: 'Contact not found' });
+
     const { errors, values } = buildTrustedContactValues(req.body || {}, current);
     if (Object.keys(errors).length) return res.status(400).json({ error: 'Check the contact details and try again.', fields: errors });
-    const existing = await db.execute({ sql: 'SELECT id, contact_method, contact_value FROM trusted_contacts WHERE user_id = ?', args: [req.user.id] });
-    const duplicate = existing.rows.some((contact: any) =>
-      Number(contact.id) !== contactId &&
-      trustedContactMethod(contact.contact_method) === values.contact_method &&
-      trustedContactDuplicateKey(values.contact_method, String(contact.contact_value || '')) === trustedContactDuplicateKey(values.contact_method, values.contact_value)
-    );
-    if (duplicate) return res.status(409).json({ error: 'A contact with this email address or phone number already exists.' });
-    const result = await db.execute({
-      sql: `UPDATE trusted_contacts SET name = ?, relationship = ?, contact_method = ?, contact_value = ?, status = ?, updated_at = ?
-            WHERE id = ? AND user_id = ? RETURNING *`,
-      args: [values.name, values.relationship, values.contact_method, values.contact_value, values.status, new Date().toISOString(), contactId, req.user.id]
+
+    const existing = await db.execute({
+      sql: "SELECT id, email, phone, contact_value FROM trusted_contacts WHERE user_id = ? AND id != ? AND status != 'DISABLED'",
+      args: [req.user.id, contactId]
     });
+
+    const duplicate = existing.rows.some((contact: any) => {
+      const emailMatch = values.email && contact.email && contact.email.toLowerCase() === values.email.toLowerCase();
+      const phoneMatch = values.phone && contact.phone && contact.phone.replace(/\D/g, '') === values.phone.replace(/\D/g, '');
+      return emailMatch || phoneMatch;
+    });
+
+    if (duplicate) return res.status(409).json({ error: 'Another active contact with this email address or phone number already exists.' });
+
+    const now = new Date().toISOString();
+    const result = await db.execute({
+      sql: `UPDATE trusted_contacts 
+            SET name = ?, relationship = ?, contact_method = ?, contact_value = ?, email = ?, phone = ?, email_enabled = ?, telegram_enabled = ?, consent_status = ?, status = ?, updated_at = ?
+            WHERE id = ? AND user_id = ? RETURNING *`,
+      args: [
+        values.name,
+        values.relationship,
+        values.contact_method,
+        values.contact_value,
+        values.email,
+        values.phone,
+        values.email_enabled,
+        values.telegram_enabled,
+        values.consent_status,
+        values.status,
+        now,
+        contactId,
+        req.user.id
+      ]
+    });
+
     if (result.rows.length === 0) return res.status(404).json({ error: 'Contact not found' });
     res.json(result.rows[0]);
   } catch (error) {
-    console.error('Trusted contact update failed');
+    console.error('Trusted contact update failed:', error);
     res.status(500).json({ error: 'Unable to update the trusted contact' });
   }
 });
@@ -3427,30 +3616,72 @@ app.delete('/api/contacts/:id', authenticateToken, async (req: any, res: any) =>
   try {
     const contactId = Number(req.params.id);
     if (!Number.isSafeInteger(contactId) || contactId <= 0) return res.status(400).json({ error: 'Invalid contact ID' });
+
+    const isPermanent = req.query.permanent === 'true';
+
+    if (isPermanent) {
+      // Detach contact from health alerts to preserve alert history integrity
+      await db.execute({
+        sql: 'UPDATE health_alerts SET contact_id = NULL WHERE contact_id = ? AND user_id = ?',
+        args: [contactId, req.user.id]
+      });
+
+      const delResult = await db.execute({
+        sql: 'DELETE FROM trusted_contacts WHERE id = ? AND user_id = ? RETURNING *',
+        args: [contactId, req.user.id]
+      });
+
+      if (delResult.rows.length === 0) return res.status(404).json({ error: 'Contact not found' });
+      return res.json({ success: true, contact: delResult.rows[0], deletedPermanently: true });
+    }
+
+    // Default: deactivation preserves record and stops all future alerts
     const result = await db.execute({
       sql: `UPDATE trusted_contacts SET status = 'DISABLED', updated_at = ? WHERE id = ? AND user_id = ? RETURNING *`,
       args: [new Date().toISOString(), contactId, req.user.id]
     });
+
     if (result.rows.length === 0) return res.status(404).json({ error: 'Contact not found' });
     res.json({ success: true, contact: result.rows[0] });
   } catch (error) {
-    console.error('Trusted contact deactivation failed');
-    res.status(500).json({ error: 'Unable to deactivate the trusted contact' });
+    console.error('Trusted contact deletion failed:', error);
+    res.status(500).json({ error: 'Unable to remove or deactivate the trusted contact' });
   }
 });
 
 app.get('/api/alerts', authenticateToken, async (req: any, res: any) => {
   try {
-    const result = await db.execute({
+    const alertsRes = await db.execute({
       sql: `SELECT a.*, c.name as contact_name
             FROM health_alerts a
             LEFT JOIN trusted_contacts c ON a.contact_id = c.id
             WHERE a.user_id = ? ORDER BY a.created_at DESC LIMIT 100`,
       args: [req.user.id]
     });
-    res.json(result.rows);
+
+    // Join notification deliveries to return one consolidated alert with nested channel delivery statuses
+    const deliveriesRes = await db.execute({
+      sql: `SELECT id, alert_id, channel, status, destination, provider, provider_message_id, attempts, delivered_at, error_message, created_at
+            FROM notification_deliveries 
+            WHERE user_id = ? ORDER BY id ASC`,
+      args: [req.user.id]
+    });
+
+    const deliveriesByAlert: Record<number, any[]> = {};
+    for (const d of deliveriesRes.rows) {
+      const aid = Number(d.alert_id);
+      if (!deliveriesByAlert[aid]) deliveriesByAlert[aid] = [];
+      deliveriesByAlert[aid].push(d);
+    }
+
+    const consolidatedAlerts = alertsRes.rows.map((alert: any) => ({
+      ...alert,
+      deliveries: deliveriesByAlert[Number(alert.id)] || []
+    }));
+
+    res.json(consolidatedAlerts);
   } catch (error) {
-    console.error('Alert history retrieval failed');
+    console.error('Alert history retrieval failed:', error);
     res.status(500).json({ error: 'Unable to retrieve alert history' });
   }
 });
