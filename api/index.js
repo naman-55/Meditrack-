@@ -5589,7 +5589,6 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import bcrypt2 from "bcryptjs";
-import { createServer as createViteServer } from "vite";
 import path5 from "path";
 import multer from "multer";
 import crypto5 from "crypto";
@@ -12948,7 +12947,8 @@ async function startServer() {
   app.use("/api", (req, res, next) => {
     res.status(404).json({ error: `Route not found: ${req.method} ${req.url}`, code: "NOT_FOUND" });
   });
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
@@ -12986,7 +12986,7 @@ if (!process.env.VERCEL) {
 }
 var server_default = app;
 
-// api/index.ts
+// backend/api/index.ts
 var isDbInitialized = false;
 var initPromise = null;
 async function ensureDbInitialized() {
@@ -13005,12 +13005,18 @@ async function ensureDbInitialized() {
 async function handler(req, res) {
   try {
     await ensureDbInitialized();
-    const originalPath = req.headers?.["x-forwarded-uri"] || req.headers?.["x-matched-path"] || req.url || "/api";
-    if (!req.url || req.url === "/" || req.url === "/api" || !req.url.startsWith("/api")) {
-      if (originalPath && originalPath.startsWith("/api")) {
-        req.url = originalPath;
-      } else {
-        req.url = "/api" + (req.url?.startsWith("/") ? req.url : "/" + (req.url || ""));
+    const queryPathMatch = req.url?.match(/[?&]__path=([^&]+)/);
+    if (queryPathMatch) {
+      const decodedPath = decodeURIComponent(queryPathMatch[1]);
+      req.url = "/api/" + decodedPath.replace(/^\/+/, "");
+    } else {
+      const originalPath = req.headers?.["x-forwarded-uri"] || req.headers?.["x-matched-path"] || req.url || "/api";
+      if (!req.url || req.url === "/" || req.url === "/api" || !req.url.startsWith("/api")) {
+        if (originalPath && originalPath.startsWith("/api")) {
+          req.url = originalPath;
+        } else {
+          req.url = "/api" + (req.url?.startsWith("/") ? req.url : "/" + (req.url || ""));
+        }
       }
     }
     return server_default(req, res);

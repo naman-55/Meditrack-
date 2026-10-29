@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import app, { initDb } from '../server.js';
+import app, { initDb } from '../../server.js';
 
 let isDbInitialized = false;
 let initPromise: Promise<void> | null = null;
@@ -24,18 +24,23 @@ export default async function handler(req: Request, res: Response) {
   try {
     await ensureDbInitialized();
 
-    // Recover original client path if Vercel headers are present
-    const originalPath = (req.headers?.['x-forwarded-uri'] as string) || 
-                         (req.headers?.['x-matched-path'] as string) || 
-                         req.url || 
-                         '/api';
+    // Check query parameter __path from Vercel rewrite
+    const queryPathMatch = req.url?.match(/[?&]__path=([^&]+)/);
+    if (queryPathMatch) {
+      const decodedPath = decodeURIComponent(queryPathMatch[1]);
+      req.url = '/api/' + decodedPath.replace(/^\/+/, '');
+    } else {
+      const originalPath = (req.headers?.['x-forwarded-uri'] as string) || 
+                           (req.headers?.['x-matched-path'] as string) || 
+                           req.url || 
+                           '/api';
 
-    // If req.url was truncated or normalized to '/', restore full original path
-    if (!req.url || req.url === '/' || req.url === '/api' || !req.url.startsWith('/api')) {
-      if (originalPath && originalPath.startsWith('/api')) {
-        req.url = originalPath;
-      } else {
-        req.url = '/api' + (req.url?.startsWith('/') ? req.url : '/' + (req.url || ''));
+      if (!req.url || req.url === '/' || req.url === '/api' || !req.url.startsWith('/api')) {
+        if (originalPath && originalPath.startsWith('/api')) {
+          req.url = originalPath;
+        } else {
+          req.url = '/api' + (req.url?.startsWith('/') ? req.url : '/' + (req.url || ''));
+        }
       }
     }
 

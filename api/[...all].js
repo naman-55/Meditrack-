@@ -1,41 +1,3 @@
-// api/index.js
-import dotenv from "dotenv";
-import path from "path";
-import jwt2 from "jsonwebtoken";
-import { GoogleGenAI, Type } from "@google/genai";
-import crypto from "crypto";
-import webpush from "web-push";
-import dotenv2 from "dotenv";
-import http from "http";
-import express from "express";
-import cors from "cors";
-import cookieParser from "cookie-parser";
-import bcrypt2 from "bcryptjs";
-import { createServer as createViteServer } from "vite";
-import path5 from "path";
-import multer from "multer";
-import crypto5 from "crypto";
-import fs4 from "fs";
-import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
-import { Router } from "express";
-import https from "https";
-import https2 from "https";
-import jwt from "jsonwebtoken";
-import { createClient } from "@libsql/client";
-import path2 from "path";
-import fs from "fs";
-import fs2 from "fs";
-import path3 from "path";
-import bcrypt from "bcryptjs";
-import jwt3 from "jsonwebtoken";
-import crypto2 from "crypto";
-import fs3 from "fs";
-import path4 from "path";
-import crypto3 from "crypto";
-import jwt4 from "jsonwebtoken";
-import { Router as Router2 } from "express";
-import crypto4 from "crypto";
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __esm = (fn, res) => function __init() {
@@ -45,6 +7,8 @@ var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
+
+// src/analytics/parameters.ts
 function normalizeParameterName(rawName) {
   if (!rawName) return "";
   const cleaned = rawName.trim().toLowerCase();
@@ -131,12 +95,15 @@ var init_parameters = __esm({
     };
   }
 });
+
+// src/lib/units/types.ts
 var init_types = __esm({
   "src/lib/units/types.ts"() {
   }
 });
-var UNIT_REGISTRY;
-var CLINICAL_PARAMETER_RULES;
+
+// src/lib/units/registry.ts
+var UNIT_REGISTRY, CLINICAL_PARAMETER_RULES;
 var init_registry = __esm({
   "src/lib/units/registry.ts"() {
     UNIT_REGISTRY = {
@@ -1107,6 +1074,8 @@ var init_registry = __esm({
     };
   }
 });
+
+// src/lib/units/converter.ts
 function sanitizeUnit(unit) {
   if (!unit) return "";
   return unit.trim().toLowerCase().replace(/\s+/g, " ").replace(/[μµ]/g, "u").replace(/x10\^?3/g, "10^3").replace(/x10\^?6/g, "10^6").replace(/x10\^?9/g, "10^9").replace(/x10\^?12/g, "10^12").replace(/x10³/g, "10^3").replace(/x10⁶/g, "10^6").replace(/x10⁹/g, "10^9").replace(/x10¹²/g, "10^12");
@@ -1982,6 +1951,8 @@ var init_converter = __esm({
     init_registry();
   }
 });
+
+// src/lib/units/index.ts
 var init_units = __esm({
   "src/lib/units/index.ts"() {
     init_types();
@@ -1989,6 +1960,8 @@ var init_units = __esm({
     init_converter();
   }
 });
+
+// src/analytics/unitRegistry.ts
 var unitRegistry_exports = {};
 __export(unitRegistry_exports, {
   CANONICAL_PARAMETERS: () => CANONICAL_PARAMETERS,
@@ -2015,6 +1988,8 @@ var init_unitRegistry = __esm({
     );
   }
 });
+
+// riskEngine.ts
 function extractNumeric(val) {
   if (val === void 0 || val === null) return null;
   if (typeof val === "number") return isNaN(val) ? null : val;
@@ -2667,13 +2642,14 @@ var init_riskEngine = __esm({
     RISK_RULE_VERSION = "2.0.0-clinical";
   }
 });
+
+// forecastService.ts
 var forecastService_exports = {};
 __export(forecastService_exports, {
   RobustForecastingEngine: () => RobustForecastingEngine,
   SimpleLinearForecastModel: () => SimpleLinearForecastModel
 });
-var RobustForecastingEngine;
-var SimpleLinearForecastModel;
+var RobustForecastingEngine, SimpleLinearForecastModel;
 var init_forecastService = __esm({
   "forecastService.ts"() {
     init_unitRegistry();
@@ -3043,6 +3019,10 @@ var init_forecastService = __esm({
     };
   }
 });
+
+// backend/config/env.ts
+import dotenv from "dotenv";
+import path from "path";
 function getValidatedConfig() {
   const nodeEnv = process.env.NODE_ENV || "development";
   const isProduction = nodeEnv === "production";
@@ -3165,8 +3145,7 @@ function getEnvironmentDiagnostics() {
     pushConfigured: envConfig.IS_PUSH_CONFIGURED
   };
 }
-var envConfig;
-var JWT_SECRET;
+var envConfig, JWT_SECRET;
 var init_env = __esm({
   "backend/config/env.ts"() {
     dotenv.config({
@@ -3178,6 +3157,9 @@ var init_env = __esm({
     JWT_SECRET = envConfig.JWT_SECRET;
   }
 });
+
+// backend/services/notifications/gmailService.ts
+import jwt2 from "jsonwebtoken";
 function sanitizeHeader(val, name) {
   if (/[\r\n]/.test(val)) {
     throw new Error(`Invalid characters in header ${name}: Header injection attempt detected.`);
@@ -3612,8 +3594,7 @@ async function disconnectGmailAccount(userId, db2) {
     throw new Error(`Failed to disconnect Gmail account: ${err.message || String(err)}`);
   }
 }
-var GMAIL_SEND_SCOPE;
-var USERINFO_EMAIL_SCOPE;
+var GMAIL_SEND_SCOPE, USERINFO_EMAIL_SCOPE;
 var init_gmailService = __esm({
   "backend/services/notifications/gmailService.ts"() {
     init_env();
@@ -3621,9 +3602,10 @@ var init_gmailService = __esm({
     USERINFO_EMAIL_SCOPE = "https://www.googleapis.com/auth/userinfo.email";
   }
 });
-var GeminiAIError;
-var AIService;
-var aiService;
+
+// backend/services/ai.service.ts
+import { GoogleGenAI, Type } from "@google/genai";
+var GeminiAIError, AIService, aiService;
 var init_ai_service = __esm({
   "backend/services/ai.service.ts"() {
     init_env();
@@ -3870,6 +3852,9 @@ ${clinicalContext}`;
     aiService = new AIService();
   }
 });
+
+// telegram-bot/telegramService.ts
+import crypto from "crypto";
 function sanitizeTelegramLog(text) {
   if (!text) return "";
   const token = envConfig.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
@@ -5027,8 +5012,7 @@ async function pollTelegramUpdates(db2) {
     return 0;
   }
 }
-var chatRateLimits;
-var cachedBotUsername;
+var chatRateLimits, cachedBotUsername;
 var init_telegramService = __esm({
   "telegram-bot/telegramService.ts"() {
     init_env();
@@ -5038,16 +5022,22 @@ var init_telegramService = __esm({
     cachedBotUsername = null;
   }
 });
+
+// telegram-bot/index.ts
 var init_telegram_bot = __esm({
   "telegram-bot/index.ts"() {
     init_telegramService();
   }
 });
+
+// backend/services/notifications/telegramService.ts
 var init_telegramService2 = __esm({
   "backend/services/notifications/telegramService.ts"() {
     init_telegram_bot();
   }
 });
+
+// backend/services/notifications/providers.ts
 var providers_exports = {};
 __export(providers_exports, {
   isValidEmail: () => isValidEmail,
@@ -5057,6 +5047,7 @@ __export(providers_exports, {
   sendSms: () => sendSms,
   sendTelegramMessage: () => sendTelegramMessage
 });
+import webpush from "web-push";
 function isValidEmail(email) {
   if (!email || typeof email !== "string") return false;
   const trimmed = email.trim();
@@ -5145,6 +5136,8 @@ var init_providers = __esm({
     }
   }
 });
+
+// backend/services/notifications/canonicalSummary.ts
 var canonicalSummary_exports = {};
 __export(canonicalSummary_exports, {
   MEDICAL_DISCLAIMER: () => MEDICAL_DISCLAIMER,
@@ -5395,6 +5388,12 @@ var init_canonicalSummary = __esm({
     MEDICAL_DISCLAIMER = "MediTrack Automated Notice: This software-generated risk assessment is compiled for authorized informational and coordination purposes. It is not a clinical diagnosis or medical treatment plan. In case of a medical emergency, please contact local emergency services immediately.";
   }
 });
+
+// server.ts
+import dotenv2 from "dotenv";
+import http from "http";
+
+// validationEngine.ts
 function validateMeasurement(parameter, normalized_value, unit) {
   const p = (parameter || "").toLowerCase().trim();
   const nv = (normalized_value || "").trim();
@@ -5446,6 +5445,8 @@ function validateMeasurement(parameter, normalized_value, unit) {
   }
   return "NEEDS_REVIEW";
 }
+
+// contradictionEngine.ts
 function normalizeDate(d) {
   if (!d) return "";
   const s = String(d).trim();
@@ -5578,10 +5579,30 @@ function detectContradictions(currentReportId, currentReportDate, allMeasurement
   }
   return contradictions;
 }
+
+// server.ts
 init_riskEngine();
 init_forecastService();
 init_parameters();
 init_unitRegistry();
+import express from "express";
+import cors from "cors";
+import cookieParser from "cookie-parser";
+import bcrypt2 from "bcryptjs";
+import path5 from "path";
+import multer from "multer";
+import crypto5 from "crypto";
+import fs4 from "fs";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
+
+// backend/routes/specialists.routes.ts
+import { Router } from "express";
+
+// backend/services/maps/places.service.ts
+import https from "https";
+
+// backend/services/maps/directions.service.ts
 var DirectionsService = class {
   /**
    * Calculate geographic distance in km using the standard Haversine formula
@@ -5623,6 +5644,8 @@ var DirectionsService = class {
     };
   }
 };
+
+// backend/services/maps/places.service.ts
 var PlacesService = class _PlacesService {
   /**
    * Search nearby medical providers from live external APIs
@@ -6020,6 +6043,9 @@ var PlacesService = class _PlacesService {
     });
   }
 };
+
+// backend/services/maps/geocoding.service.ts
+import https2 from "https";
 var geocodeCache = /* @__PURE__ */ new Map();
 var CACHE_TTL_MS = 15 * 60 * 1e3;
 var GeocodingService = class {
@@ -6128,6 +6154,8 @@ var GeocodingService = class {
     });
   }
 };
+
+// backend/services/maps/maps.service.ts
 var nearbySearchCache = /* @__PURE__ */ new Map();
 var CACHE_TTL_MS2 = 10 * 60 * 1e3;
 var MapsService = class {
@@ -6192,6 +6220,8 @@ var MapsService = class {
     nearbySearchCache.clear();
   }
 };
+
+// backend/controllers/specialists.controller.ts
 var SUPPORTED_SPECIALTIES = [
   { id: "all", name: "All Specialists", icon: "Stethoscope", description: "Comprehensive medical specialists and facilities" },
   { id: "cardiologist", name: "Cardiologist", icon: "HeartPulse", description: "Heart, blood vessels, and cardiovascular systems" },
@@ -6302,12 +6332,22 @@ var SpecialistsController = class {
     return res.json(SUPPORTED_SPECIALTIES);
   }
 };
+
+// backend/routes/specialists.routes.ts
 var specialistsRouter = Router();
 specialistsRouter.get("/nearby", SpecialistsController.getNearbySpecialists);
 specialistsRouter.get("/geocode", SpecialistsController.geocodeLocation);
 specialistsRouter.get("/directions", SpecialistsController.getDirections);
 specialistsRouter.get("/specialties", SpecialistsController.getSupportedSpecialties);
+
+// backend/middleware/auth.middleware.ts
 init_env();
+import jwt from "jsonwebtoken";
+
+// backend/db/db.ts
+import { createClient } from "@libsql/client";
+import path2 from "path";
+import fs from "fs";
 function getDbConfig() {
   const tursoUrl = process.env.TURSO_DATABASE_URL || process.env.DATABASE_URL;
   if (tursoUrl && (tursoUrl.startsWith("libsql://") || tursoUrl.startsWith("https://") || tursoUrl.startsWith("http://"))) {
@@ -6336,6 +6376,8 @@ function getDbConfig() {
   };
 }
 var db = createClient(getDbConfig());
+
+// backend/middleware/auth.middleware.ts
 var authenticateToken = async (req, res, next) => {
   let token;
   const authHeader = req.headers["authorization"];
@@ -6423,6 +6465,8 @@ var requireRole = (requiredRole) => {
     next();
   };
 };
+
+// backend/middleware/rateLimit.middleware.ts
 function createRateLimiter(options) {
   const store = /* @__PURE__ */ new Map();
   setInterval(() => {
@@ -6498,6 +6542,8 @@ setInterval(() => {
     if (now > record.resetAt) ipResetStore.delete(key);
   }
 }, 10 * 60 * 1e3).unref();
+
+// backend/middleware/security.middleware.ts
 var securityHeadersMiddleware = (req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "SAMEORIGIN");
@@ -6537,6 +6583,10 @@ var apiErrorHandler = (err, req, res, next) => {
     timestamp
   });
 };
+
+// backend/validators/fileUpload.validator.ts
+import fs2 from "fs";
+import path3 from "path";
 var ALLOWED_EXTENSIONS = /* @__PURE__ */ new Set([".pdf", ".png", ".jpg", ".jpeg"]);
 var MAX_FILE_SIZE = 10 * 1024 * 1024;
 function validateUploadedFile(filePath, originalName, declaredMimeType) {
@@ -6626,7 +6676,14 @@ function validateUploadedFile(filePath, originalName, declaredMimeType) {
     detectedFormat: isPdf ? "pdf" : isPng ? "png" : "jpeg"
   };
 }
+
+// backend/services/validationRunner.service.ts
+import bcrypt from "bcryptjs";
+import jwt3 from "jsonwebtoken";
+import crypto2 from "crypto";
 init_riskEngine();
+import fs3 from "fs";
+import path4 from "path";
 async function runSoftwareValidationSuite() {
   const testCases = [];
   const runTest = async (id, category, name, description, expected, fn) => {
@@ -7040,8 +7097,14 @@ async function runSoftwareValidationSuite() {
     disclaimer: "CLINICAL DECISION SUPPORT & SOFTWARE INTEGRITY VERIFICATION ONLY. Tests execute genuine software units, cryptographic checks, and mathematical algorithms. MediTrack provides decision support and does not replace licensed medical diagnosis or clinician consultation."
   };
 }
+
+// server.ts
 init_env();
+
+// backend/services/auth.service.ts
 init_env();
+import crypto3 from "crypto";
+import jwt4 from "jsonwebtoken";
 var hashToken = (rawToken) => {
   return crypto3.createHash("sha256").update(rawToken).digest("hex");
 };
@@ -7170,7 +7233,11 @@ var authService = {
     return { valid: true, tokenRecord, user };
   }
 };
+
+// server.ts
 init_ai_service();
+
+// backend/services/specialtyGuidance.service.ts
 function normalizeKey(param) {
   const p = (param || "").toLowerCase().trim();
   if (p.includes("fasting") && p.includes("glucose")) return "fasting_glucose";
@@ -7645,7 +7712,12 @@ async function generateSpecialtyGuidance(userId) {
   }
   return generatedRecords;
 }
+
+// backend/routes/notifications.routes.ts
+import { Router as Router2 } from "express";
 init_env();
+
+// backend/services/notifications/dispatcher.ts
 init_env();
 init_canonicalSummary();
 init_providers();
@@ -7831,8 +7903,12 @@ Timestamp: <code>${(/* @__PURE__ */ new Date()).toLocaleString()}</code>
   }
   throw new Error(`Unsupported notification channel: ${channel}`);
 }
+
+// backend/routes/notifications.routes.ts
 init_gmailService();
 init_telegramService2();
+
+// backend/services/notifications/dbSchema.ts
 async function getTableColumns(db2, tableName) {
   try {
     const res = await db2.execute(`PRAGMA table_info(${tableName})`);
@@ -8080,6 +8156,8 @@ async function validateDatabaseSchema(db2) {
     missing
   };
 }
+
+// backend/routes/notifications.routes.ts
 var notificationsRouter = Router2();
 notificationsRouter.get("/channels", authenticateToken, async (req, res) => {
   try {
@@ -8379,8 +8457,11 @@ notificationsRouter.put("/alerts/:id/acknowledge", authenticateToken, async (req
     res.status(500).json({ error: "Unable to acknowledge alert" });
   }
 });
+
+// backend/services/alertClassification.service.ts
 init_parameters();
 init_unitRegistry();
+import crypto4 from "crypto";
 var VALIDATED_CLINICAL_RULES = {
   // Blood Glucose (Fasting)
   fasting_glucose: {
@@ -8739,6 +8820,8 @@ function generateIdempotencyKey(userId, reportId, param, severity, val) {
   const payload = `${userId}:${reportId}:${param}:${severity}:${val}`;
   return crypto4.createHash("sha256").update(payload).digest("hex");
 }
+
+// backend/services/emailDelivery.service.ts
 init_env();
 function buildEmergencyEmailHtml(payload) {
   const { recipientName, patientName, alert, isTest } = payload;
@@ -8980,6 +9063,8 @@ var emailDeliveryService = {
     };
   }
 };
+
+// backend/services/smsDelivery.service.ts
 init_env();
 function validateAndFormatE164(phone) {
   if (!phone) {
@@ -9091,6 +9176,8 @@ var smsDeliveryService = {
     }
   }
 };
+
+// backend/services/alertManager.service.ts
 var alertManager = {
   /**
    * Process and evaluate all measurements from a medical report.
@@ -9386,6 +9473,8 @@ var alertManager = {
     }));
   }
 };
+
+// server.ts
 dotenv2.config({ quiet: true, override: true });
 var app = express();
 var PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3e3;
@@ -12858,7 +12947,8 @@ async function startServer() {
   app.use("/api", (req, res, next) => {
     res.status(404).json({ error: `Route not found: ${req.method} ${req.url}`, code: "NOT_FOUND" });
   });
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
@@ -12895,6 +12985,8 @@ if (!process.env.VERCEL) {
   startServer();
 }
 var server_default = app;
+
+// backend/api/index.ts
 var isDbInitialized = false;
 var initPromise = null;
 async function ensureDbInitialized() {
@@ -12913,12 +13005,18 @@ async function ensureDbInitialized() {
 async function handler(req, res) {
   try {
     await ensureDbInitialized();
-    const originalPath = req.headers?.["x-forwarded-uri"] || req.headers?.["x-matched-path"] || req.url || "/api";
-    if (!req.url || req.url === "/" || req.url === "/api" || !req.url.startsWith("/api")) {
-      if (originalPath && originalPath.startsWith("/api")) {
-        req.url = originalPath;
-      } else {
-        req.url = "/api" + (req.url?.startsWith("/") ? req.url : "/" + (req.url || ""));
+    const queryPathMatch = req.url?.match(/[?&]__path=([^&]+)/);
+    if (queryPathMatch) {
+      const decodedPath = decodeURIComponent(queryPathMatch[1]);
+      req.url = "/api/" + decodedPath.replace(/^\/+/, "");
+    } else {
+      const originalPath = req.headers?.["x-forwarded-uri"] || req.headers?.["x-matched-path"] || req.url || "/api";
+      if (!req.url || req.url === "/" || req.url === "/api" || !req.url.startsWith("/api")) {
+        if (originalPath && originalPath.startsWith("/api")) {
+          req.url = originalPath;
+        } else {
+          req.url = "/api" + (req.url?.startsWith("/") ? req.url : "/" + (req.url || ""));
+        }
       }
     }
     return server_default(req, res);
@@ -12933,7 +13031,7 @@ async function handler(req, res) {
   }
 }
 
-// api/[...all].ts
+// backend/api/[...all].ts
 var all_default = handler;
 export {
   all_default as default

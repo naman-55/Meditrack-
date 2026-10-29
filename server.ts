@@ -8,7 +8,6 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import multer from 'multer';
 import crypto from 'crypto';
@@ -3910,7 +3909,8 @@ async function startServer() {
     res.status(404).json({ error: `Route not found: ${req.method} ${req.url}`, code: 'NOT_FOUND' });
   });
 
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { 
         middlewareMode: true,
