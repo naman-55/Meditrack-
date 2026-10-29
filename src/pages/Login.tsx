@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { authService } from '../api/auth';
 import { HeartPulse, Eye, EyeOff, UserCheck, ShieldCheck, KeyRound, ArrowLeft, MailCheck, ShieldAlert } from 'lucide-react';
 import { useNavigate, Navigate, useSearchParams } from 'react-router-dom';
+import BrandLogo from '../components/common/BrandLogo';
 
 export default function Login() {
   const { login, register, user } = useAuth();
@@ -112,14 +113,12 @@ export default function Login() {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="flex justify-center">
-          <div className="w-12 h-12 rounded-xl bg-emerald-600 flex items-center justify-center shrink-0 shadow-lg shadow-emerald-600/20">
-            <HeartPulse className="w-6 h-6 text-white" />
-          </div>
+        <div className="flex justify-center mb-2">
+          <BrandLogo size="lg" versionText="v3.2" taglineText="Clinical Intelligence Suite" />
         </div>
-        <h2 className="mt-6 text-center text-2xl font-bold tracking-tight text-slate-900">
-          {mode === 'login' && 'Sign in to MediTrack'}
-          {mode === 'register' && 'Create your MediTrack Account'}
+        <h2 className="mt-4 text-center text-xl font-bold tracking-tight text-slate-800">
+          {mode === 'login' && 'Sign in to your account'}
+          {mode === 'register' && 'Create your account'}
           {mode === 'forgot' && 'Reset Account Password'}
           {mode === 'reset_confirm' && 'Set New Password'}
         </h2>

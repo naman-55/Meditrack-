@@ -1,4 +1,4 @@
-# MediTrack V3.1 — Intelligent Clinical Analytics & Longitudinal Healthcare Insights
+# MediTrack V3.2 — Intelligent Clinical Analytics & Longitudinal Healthcare Insights
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue.svg)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-19.0-61dafb.svg)](https://react.dev/)
@@ -8,7 +8,7 @@
 [![SQLite](https://img.shields.io/badge/Database-SQLite-003B57.svg)](https://sqlite.org/)
 [![License](https://img.shields.io/badge/License-Proprietary-red.svg)]()
 
-> **MediTrack V3.1** is a high-performance clinical analytics platform designed to ingest laboratory reports, extract biomarkers via Google Gemini AI, track longitudinal patient trends, detect diagnostic contradictions with clinical severity scoring, and provide proactive healthcare insights.
+> **MediTrack V3.2** is a high-performance clinical analytics platform designed to ingest laboratory reports, extract biomarkers via Google Gemini AI, track longitudinal patient trends, detect diagnostic contradictions with clinical severity scoring, and provide proactive healthcare insights.
 
 ---
 

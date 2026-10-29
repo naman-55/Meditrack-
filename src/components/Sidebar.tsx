@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { useAuth } from '../context/AuthContext';
+import BrandLogo from './common/BrandLogo';
 
 interface SidebarProps {
   onClose?: () => void;
@@ -57,15 +58,9 @@ export default function Sidebar({ onClose }: SidebarProps) {
     >
       {/* Logo & Mobile Close */}
       <div className="p-5 sm:p-6 border-b border-slate-100 dark:border-[#0D1C2E] shrink-0 flex items-center justify-between bg-white dark:bg-[#000000]">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-[#00D6B0] flex items-center justify-center shrink-0 shadow-xs">
-              <div className="w-4 h-4 border-2 border-[#000000] rounded-xs"></div>
-            </div>
-            <h1 className="text-xl font-bold tracking-tight text-slate-800 dark:text-[#FFFFFF] leading-tight">MediTrack</h1>
-          </div>
-          <p className="text-[10px] uppercase tracking-widest text-emerald-600 dark:text-[#00D6B0] font-bold mt-1.5">Health Insights v1.0</p>
-        </div>
+        <NavLink to="/" onClick={onClose} className="hover:opacity-95 transition-opacity">
+          <BrandLogo size="md" versionText="v3.2" taglineText="Clinical Analytics" />
+        </NavLink>
         {onClose && (
           <button
             type="button"

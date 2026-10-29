@@ -64,7 +64,7 @@ app.use('/api', generalRateLimiter);
 app.get('/api/health', (req: any, res: any) => {
   res.json({
     status: 'HEALTHY',
-    version: '3.1.0',
+    version: '3.2.0',
     timestamp: new Date().toISOString(),
     env: getEnvironmentDiagnostics(),
     ai: aiService.getHealth()
