@@ -24,9 +24,19 @@ export default async function handler(req: Request, res: Response) {
   try {
     await ensureDbInitialized();
 
-    // Ensure request URL preserves the /api prefix so Express route handlers match
-    if (req.url && !req.url.startsWith('/api')) {
-      req.url = '/api' + (req.url.startsWith('/') ? req.url : '/' + req.url);
+    // Recover original client path if Vercel headers are present
+    const originalPath = (req.headers?.['x-forwarded-uri'] as string) || 
+                         (req.headers?.['x-matched-path'] as string) || 
+                         req.url || 
+                         '/api';
+
+    // If req.url was truncated or normalized to '/', restore full original path
+    if (!req.url || req.url === '/' || req.url === '/api' || !req.url.startsWith('/api')) {
+      if (originalPath && originalPath.startsWith('/api')) {
+        req.url = originalPath;
+      } else {
+        req.url = '/api' + (req.url?.startsWith('/') ? req.url : '/' + (req.url || ''));
+      }
     }
 
     return app(req, res);
