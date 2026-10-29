@@ -149,9 +149,6 @@ const handleResponse = async (res: Response) => {
     } catch (e) {}
     const err: any = new Error(errorMsg);
     err.status = res.status;
-    try {
-      err.code = JSON.parse(text).code;
-    } catch (e) {}
     throw err;
   }
   return res.json();

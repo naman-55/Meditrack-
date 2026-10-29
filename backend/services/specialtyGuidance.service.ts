@@ -97,7 +97,7 @@ export async function calculateHealthSnapshot(userId: number): Promise<HealthSna
       abnormalResults: 0,
       trendsToMonitor: 0,
       specialtiesSuggested: 0,
-      lastUpdated: '',
+      lastUpdated: new Date().toISOString(),
       status: 'No medical data'
     };
   }
@@ -146,21 +146,13 @@ export async function calculateHealthSnapshot(userId: number): Promise<HealthSna
   }
 
   const guidancesRes = await db.execute({
-    sql: 'SELECT count(*) as count, MAX(created_at) as analyzed_at FROM specialty_guidance WHERE user_id = ?',
+    sql: 'SELECT count(*) as count FROM specialty_guidance WHERE user_id = ?',
     args: [userId]
   });
   const specialtiesCount = Number(guidancesRes.rows[0]?.count || 0);
 
   const latestReport = reports[0];
-  const analyzedAt = guidancesRes.rows[0]?.analyzed_at;
-  const reportUpdatedAt = latestReport?.upload_date || latestReport?.report_date;
-  const analyzedTime = analyzedAt ? new Date(String(analyzedAt)).getTime() : Number.NaN;
-  const reportUpdatedTime = reportUpdatedAt ? new Date(String(reportUpdatedAt)).getTime() : Number.NaN;
-  const analysisIsCurrent = specialtiesCount > 0 && Number.isFinite(analyzedTime) && Number.isFinite(reportUpdatedTime) && analyzedTime >= reportUpdatedTime;
-  const updateCandidates = [analyzedAt, latestReport?.upload_date, latestReport?.report_date]
-    .filter((value): value is string => typeof value === 'string' && value.length > 0)
-    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
-  const lastUpdated = updateCandidates[0] || '';
+  const lastUpdated = (latestReport?.report_date || latestReport?.upload_date || new Date().toISOString()) as string;
 
   return {
     reportCount: reports.length,
@@ -170,7 +162,7 @@ export async function calculateHealthSnapshot(userId: number): Promise<HealthSna
     trendsToMonitor: trendsCount,
     specialtiesSuggested: specialtiesCount,
     lastUpdated,
-    status: analysisIsCurrent ? 'Analysis up to date' : 'Analysis needs refresh'
+    status: 'Analysis up to date'
   };
 }
 

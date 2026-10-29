@@ -129,10 +129,16 @@ export default function ResetPassword() {
           
           {/* Verification Loading State */}
           {verifying && (
-            <div className="py-8 text-center space-y-3">
-              <RefreshCw className="w-8 h-8 text-[#00A884] animate-spin mx-auto" />
-              <p className="text-sm font-semibold text-[#071B49]">Verifying cryptographic token...</p>
-              <p className="text-xs text-[#64748B]">Ensuring token authenticity and unexpired status.</p>
+            <div className="py-4 space-y-4">
+              <div className="space-y-2">
+                <div className="h-4 w-32 bg-slate-200 rounded animate-pulse" />
+                <div className="h-10 w-full bg-slate-100 rounded-xl animate-pulse" />
+              </div>
+              <div className="space-y-2">
+                <div className="h-4 w-28 bg-slate-200 rounded animate-pulse" />
+                <div className="h-10 w-full bg-slate-100 rounded-xl animate-pulse" />
+              </div>
+              <div className="h-11 w-full bg-slate-200 rounded-xl animate-pulse pt-2" />
             </div>
           )}
 

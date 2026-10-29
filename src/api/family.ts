@@ -1,17 +1,17 @@
 import { apiClient } from './client';
 
-export interface NotificationDeliveryRecord {
-  id: number;
-  alert_id: number;
-  channel: 'EMAIL' | 'TELEGRAM' | 'SMS' | 'PUSH';
-  status: 'PENDING' | 'SENT' | 'DELIVERED' | 'ACCEPTED' | 'FAILED' | 'SKIPPED';
-  destination: string;
-  provider?: string | null;
-  provider_message_id?: string | null;
-  attempts: number;
-  delivered_at?: string | null;
-  error_message?: string | null;
-  created_at: string;
+export interface TrustedContactValues {
+  name: string;
+  relationship: string;
+  contact_method: string;
+  contact_value: string;
+  email?: string;
+  phone?: string;
+  email_enabled?: number;
+  sms_enabled?: number;
+  telegram_enabled?: number;
+  consent_status?: 'GRANTED' | 'REVOKED' | 'PENDING';
+  status?: string;
 }
 
 export interface TrustedContact {
@@ -23,15 +23,18 @@ export interface TrustedContact {
   contact_value: string;
   email?: string | null;
   phone?: string | null;
+  is_emergency?: number;
   email_enabled?: number;
   sms_enabled?: number;
+  consent_email?: number;
+  consent_sms?: number;
   telegram_chat_id?: string | null;
   telegram_username?: string | null;
   telegram_enabled?: number;
   telegram_linked_at?: string | null;
   consent_status?: 'GRANTED' | 'REVOKED' | 'PENDING';
   consent_date?: string | null;
-  status: 'ACTIVE' | 'DISABLED' | 'INACTIVE';
+  status: 'ACTIVE' | 'DISABLED' | 'INACTIVE' | string;
   created_at: string;
   updated_at?: string | null;
 }
@@ -71,28 +74,55 @@ export interface HealthSummaryPayload {
   disclaimer: string;
 }
 
+export interface NotificationDelivery {
+  id: number;
+  alert_id: number;
+  channel: 'EMAIL' | 'SMS' | 'TELEGRAM' | 'IN_APP' | string;
+  recipient?: string;
+  destination?: string;
+  provider?: string;
+  provider_message_id?: string | null;
+  delivery_status?: 'QUEUED' | 'SENT' | 'DELIVERED' | 'FAILED' | 'SKIPPED' | string;
+  status?: string;
+  attempt_count?: number;
+  attempts?: number;
+  error_message?: string | null;
+  delivered_at?: string | null;
+  created_at: string;
+  updated_at?: string;
+}
+
+export type NotificationDeliveryRecord = NotificationDelivery;
+
 export interface HealthAlert {
   id: number;
   user_id: number;
   contact_id: number | null;
   contact_name?: string;
   type: string;
+  severity?: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL' | 'INFORMATIONAL' | 'WARNING' | 'HIGH_PRIORITY' | string;
+  title?: string;
   message: string;
   source: string;
   status: string;
   delivery_channel?: string | null;
-  severity?: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
-  title?: string;
   summary_json?: string | null;
   abnormal_findings_json?: string | null;
   recommendations_json?: string | null;
   trigger_source?: string | null;
-  deliveries?: NotificationDeliveryRecord[];
+  parameter?: string;
+  measured_value?: string;
+  reference_range?: string;
+  source_report_id?: number | null;
+  idempotency_key?: string | null;
+  action_url?: string | null;
+  details_json?: string | null;
   is_read?: number;
   read_at?: string | null;
   acknowledged_at?: string | null;
   acknowledged_by?: string | null;
   created_at: string;
+  deliveries?: NotificationDelivery[];
 }
 
 export const familyService = {
@@ -113,5 +143,20 @@ export const familyService = {
   },
   acknowledgeAlert: async (id: number): Promise<{ success: boolean; alert: HealthAlert }> => {
     return apiClient.put(`/api/notifications/alerts/${id}/acknowledge`, {});
+  },
+  getUnreadCount: async (): Promise<{ unreadCount: number }> => {
+    return apiClient.get('/api/alerts/unread-count');
+  },
+  markAlertRead: async (id: number): Promise<{ success: boolean }> => {
+    return apiClient.put(`/api/alerts/${id}/read`, {});
+  },
+  markAllAlertsRead: async (): Promise<{ success: boolean }> => {
+    return apiClient.put('/api/alerts/read-all', {});
+  },
+  getAlertDeliveries: async (id: number): Promise<NotificationDelivery[]> => {
+    return apiClient.get(`/api/alerts/${id}/deliveries`);
+  },
+  sendTestEmergencyAlert: async (contactId?: number): Promise<{ success: boolean; alert: HealthAlert; deliveries: NotificationDelivery[] }> => {
+    return apiClient.post('/api/alerts/test-emergency', { contact_id: contactId });
   }
 };

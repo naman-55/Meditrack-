@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldCheck, AlertCircle, FileText, CheckCircle2, XCircle, Info, Activity } from 'lucide-react';
 import { validationService, ValidationReport, TestCase } from '../../api/validation';
+import { AdminTableSkeleton } from '../../components/common/Skeleton';
 
 export default function SoftwareValidation() {
   const [report, setReport] = useState<ValidationReport | null>(null);
@@ -25,11 +26,7 @@ export default function SoftwareValidation() {
   }, []);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div>
-      </div>
-    );
+    return <AdminTableSkeleton title="Software Validation & Compliance" subtitle="Automated validation runner and medical rules verification reports" />;
   }
 
   if (error || !report) {

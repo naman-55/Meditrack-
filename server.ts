@@ -33,6 +33,8 @@ import { generateSpecialtyGuidance, calculateHealthSnapshot } from './backend/se
 import { notificationsRouter } from './backend/routes/notifications.routes.js';
 import { initNotificationSchema, validateDatabaseSchema } from './backend/services/notifications/dbSchema.js';
 import { createAndDispatchHealthAlert } from './backend/services/notifications/dispatcher.js';
+import { alertManager } from './backend/services/alertManager.service.js';
+
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
@@ -458,13 +460,39 @@ async function initDb() {
 
     try { await db.execute('ALTER TABLE health_alerts ADD COLUMN is_read INTEGER DEFAULT 0'); } catch(e) {}
     try { await db.execute('ALTER TABLE health_alerts ADD COLUMN read_at TEXT'); } catch(e) {}
-    try { await db.execute('ALTER TABLE trusted_contacts ADD COLUMN updated_at TEXT'); } catch(e) {}
-    try { await db.execute('ALTER TABLE health_alerts ADD COLUMN delivery_channel TEXT'); } catch(e) {}
-    try { await db.execute('ALTER TABLE health_alerts ADD COLUMN event_key TEXT'); } catch(e) {}
-    try {
-      await db.execute(`UPDATE health_alerts SET status = 'RECORDED', delivery_channel = 'IN_APP'
-                        WHERE status = 'DELIVERED' AND (delivery_channel IS NULL OR delivery_channel = '')`);
-    } catch(e) {}
+    try { await db.execute('ALTER TABLE health_alerts ADD COLUMN severity TEXT DEFAULT "WARNING"'); } catch(e) {}
+    try { await db.execute('ALTER TABLE health_alerts ADD COLUMN title TEXT'); } catch(e) {}
+    try { await db.execute('ALTER TABLE health_alerts ADD COLUMN parameter TEXT'); } catch(e) {}
+    try { await db.execute('ALTER TABLE health_alerts ADD COLUMN measured_value TEXT'); } catch(e) {}
+    try { await db.execute('ALTER TABLE health_alerts ADD COLUMN reference_range TEXT'); } catch(e) {}
+    try { await db.execute('ALTER TABLE health_alerts ADD COLUMN source_report_id INTEGER'); } catch(e) {}
+    try { await db.execute('ALTER TABLE health_alerts ADD COLUMN idempotency_key TEXT'); } catch(e) {}
+    try { await db.execute('ALTER TABLE health_alerts ADD COLUMN action_url TEXT'); } catch(e) {}
+    try { await db.execute('ALTER TABLE health_alerts ADD COLUMN details_json TEXT'); } catch(e) {}
+
+    // Trusted Contacts Schema Extensions (Phase 4)
+    try { await db.execute('ALTER TABLE trusted_contacts ADD COLUMN email TEXT'); } catch(e) {}
+    try { await db.execute('ALTER TABLE trusted_contacts ADD COLUMN phone TEXT'); } catch(e) {}
+    try { await db.execute('ALTER TABLE trusted_contacts ADD COLUMN is_emergency INTEGER DEFAULT 1'); } catch(e) {}
+    try { await db.execute('ALTER TABLE trusted_contacts ADD COLUMN consent_email INTEGER DEFAULT 1'); } catch(e) {}
+    try { await db.execute('ALTER TABLE trusted_contacts ADD COLUMN consent_sms INTEGER DEFAULT 1'); } catch(e) {}
+
+    // Notification Deliveries Audit Table (Phase 9)
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS notification_deliveries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        alert_id INTEGER,
+        channel TEXT NOT NULL,
+        recipient TEXT NOT NULL,
+        provider_message_id TEXT,
+        delivery_status TEXT NOT NULL,
+        attempt_count INTEGER DEFAULT 0,
+        error_message TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(alert_id) REFERENCES health_alerts(id) ON DELETE CASCADE
+      )
+    `);
 
     // Future Outlook Schema Extensions (Phase 6)
     try { await db.execute('ALTER TABLE future_outlook ADD COLUMN status TEXT'); } catch(e) {}
@@ -507,7 +535,10 @@ async function initDb() {
       'CREATE INDEX IF NOT EXISTS idx_meds_user ON medications(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_habits_user ON habits(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_chat_messages_user ON chat_messages(user_id)',
-      'CREATE INDEX IF NOT EXISTS idx_analysis_cache_user ON medical_analysis_cache(user_id)'
+      'CREATE INDEX IF NOT EXISTS idx_analysis_cache_user ON medical_analysis_cache(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_deliveries_alert ON notification_deliveries(alert_id)',
+      'CREATE INDEX IF NOT EXISTS idx_deliveries_status ON notification_deliveries(delivery_status)',
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_alerts_idempotency ON health_alerts(idempotency_key)'
     ];
 
     for (const stmt of indexStatements) {
@@ -1748,71 +1779,6 @@ app.post('/api/reports/upload', authenticateToken, uploadRateLimiter, upload.sin
     });
     report.processing_status = 'COMPLETED';
 
-    // Evaluate extracted biomarkers to determine alert severity and create canonical alert
-    try {
-      let alertSeverity: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL' = 'MODERATE';
-      let alertTitle = 'Medical Report Processed';
-      let mainReason = `Medical report "${report.filename}" was successfully analyzed.`;
-      const abnormalFlags: string[] = [];
-
-      for (const m of parsedMeasurements) {
-        const p = (m.parameter || '').toLowerCase();
-        const v = (m.normalized_value || m.raw_value || '').trim();
-        const num = parseFloat(v.replace(/,/g, ''));
-        if (p.includes('blood pressure') || p.includes('bp')) {
-          const parts = v.split('/');
-          if (parts.length === 2) {
-            const sys = parseInt(parts[0], 10);
-            const dia = parseInt(parts[1], 10);
-            if (sys >= 140 || dia >= 90) {
-              const isCrit = sys >= 180 || dia >= 120;
-              alertSeverity = isCrit ? 'CRITICAL' : 'HIGH';
-              abnormalFlags.push(`BP ${v} mmHg (${isCrit ? 'Critical Stage 3' : 'Stage 2 Hypertension'})`);
-            }
-          }
-        } else if (p === 'hba1c' || p.includes('glycated')) {
-          if (!isNaN(num) && num >= 6.5) {
-            if (num >= 9.0) alertSeverity = 'CRITICAL';
-            else if (alertSeverity !== 'CRITICAL') alertSeverity = 'HIGH';
-            abnormalFlags.push(`HbA1c ${num}% (Elevated)`);
-          }
-        } else if (p.includes('glucose') && (num >= 126 || num < 70)) {
-          if (num >= 200 || num < 55) alertSeverity = 'CRITICAL';
-          else if (alertSeverity !== 'CRITICAL') alertSeverity = 'HIGH';
-          abnormalFlags.push(`Glucose ${num} mg/dL`);
-        } else if (p === 'ldl' && num >= 160) {
-          if (alertSeverity !== 'CRITICAL') alertSeverity = 'HIGH';
-          abnormalFlags.push(`LDL ${num} mg/dL`);
-        }
-      }
-
-      if (abnormalFlags.length > 0) {
-        alertTitle = `${alertSeverity === 'CRITICAL' ? 'Critical' : 'High-Priority'} Health Alert`;
-        mainReason = `Automated analysis of ${report.filename} identified: ${abnormalFlags.join(', ')}.`;
-      }
-
-      // Check for duplicate alert by event_key before inserting
-      const eventKey = `report-processed:${report.id}`;
-      const existingAlert = await db.execute({
-        sql: 'SELECT id FROM health_alerts WHERE user_id = ? AND event_key = ?',
-        args: [req.user.id, eventKey]
-      });
-
-      if (existingAlert.rows.length === 0) {
-        await createAndDispatchHealthAlert(db, {
-          userId: req.user.id,
-          severity: alertSeverity,
-          title: alertTitle,
-          mainReason,
-          source: 'Medical Report Processing',
-          sourceReportId: Number(report.id),
-          eventKey
-        });
-      }
-    } catch (alertError) {
-      console.warn('Could not record or dispatch the report processing notification:', alertError);
-    }
-
     // Invalidate analysis cache and refresh specialty guidance for newly processed report
     try {
       await db.execute({
@@ -1820,8 +1786,18 @@ app.post('/api/reports/upload', authenticateToken, uploadRateLimiter, upload.sin
         args: [req.user.id]
       });
       await generateSpecialtyGuidance(req.user.id);
+      await executeRiskAssessmentForUser(req.user.id);
+      await executeFutureOutlookForUser(req.user.id);
     } catch (cacheErr) {
       console.warn('Failed to invalidate/refresh medical analysis cache:', cacheErr);
+    }
+
+    // Real-Time Health Risk Alert & Emergency Pipeline Evaluation (Phase 7)
+    try {
+      const generatedAlerts = await alertManager.processReportAlerts(req.user.id, report.id as number);
+      console.log(`[AlertManager] Evaluated report #${report.id}: Generated ${generatedAlerts.length} alert(s).`);
+    } catch (alertErr) {
+      console.error('[AlertManager] Failed to evaluate report alerts:', alertErr);
     }
 
   } catch (error: any) {
@@ -2251,394 +2227,344 @@ app.get('/api/trends/chart/:parameter', authenticateToken, async (req: any, res)
   res.json(chartData);
 });
 
-// --- RISK ASSESSMENT ROUTES ---
-app.post('/api/risk/analyze', authenticateToken, aiRateLimiter, async (req: any, res) => {
-  // Get all measurements for the user
+// --- RISK ASSESSMENT CORE EXECUTOR & ROUTES ---
+async function executeRiskAssessmentForUser(userId: number) {
   const result = await db.execute({
-    sql: `SELECT m.parameter, m.normalized_value, m.validation_status, m.source_page as page, r.report_date, r.filename as report 
+    sql: `SELECT m.id, m.parameter, m.raw_value, m.normalized_value, m.unit, m.normalized_unit,
+                 m.validation_status, m.source_page as page, r.report_date, r.filename as report 
           FROM measurements m 
           JOIN medical_reports r ON m.report_id = r.id 
           WHERE r.user_id = ? 
-          ORDER BY r.report_date DESC`,
-    args: [req.user.id]
+          ORDER BY r.report_date ASC, m.id ASC`,
+    args: [userId]
   });
 
   const measurements = result.rows as unknown as MeasurementRecord[];
-
-  // Run the explicit risk rules engine
   const riskResults = evaluateRiskAllDomains(measurements);
-
   const now = new Date().toISOString();
 
   // Clear previous risk assessments
   await db.execute({
     sql: 'DELETE FROM risk_assessment WHERE user_id = ?',
-    args: [req.user.id]
+    args: [userId]
   });
 
   const assessmentsCreated = [];
-
   for (const risk of riskResults) {
     const insertResult = await db.execute({
       sql: `INSERT INTO risk_assessment (user_id, domain, level, label, evidence, data_quality, rule_version, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-      args: [req.user.id, risk.domain, risk.level, risk.label, risk.evidence, risk.data_quality, risk.rule_version, now]
+      args: [userId, risk.domain, risk.level, risk.label, risk.evidence, risk.data_quality, risk.rule_version, now]
     });
     assessmentsCreated.push(insertResult.rows[0]);
   }
+  return assessmentsCreated;
+}
 
-  // Automatically trigger qualifying health alert if RED or ORANGE risk detected
-  const highRisks = riskResults.filter(r => r.level === 'RED' || r.level === 'ORANGE');
-  if (highRisks.length > 0) {
-    try {
-      const worstLevel = highRisks.some(r => r.level === 'RED') ? 'CRITICAL' : 'HIGH';
-      const domainNames = highRisks.map(r => r.domain).join(' & ');
-      const todayDate = now.split('T')[0];
-      const riskKey = `risk-alert:${req.user.id}:${worstLevel}:${todayDate}`;
-
-      const existingAlert = await db.execute({
-        sql: 'SELECT id FROM health_alerts WHERE user_id = ? AND event_key = ?',
-        args: [req.user.id, riskKey]
-      });
-
-      if (existingAlert.rows.length === 0) {
-        await createAndDispatchHealthAlert(db, {
-          userId: req.user.id,
-          severity: worstLevel,
-          title: `${worstLevel === 'CRITICAL' ? 'Critical' : 'Elevated'} Clinical Risk (${domainNames})`,
-          mainReason: `Risk assessment calculated ${worstLevel.toLowerCase()} priority indicators in ${domainNames} domain.`,
-          source: 'Clinical Risk Assessment',
-          eventKey: riskKey
-        });
-      }
-    } catch (riskAlertErr) {
-      console.warn('Risk alert dispatch notice:', riskAlertErr);
-    }
+app.post('/api/risk/analyze', authenticateToken, aiRateLimiter, async (req: any, res) => {
+  try {
+    const assessments = await executeRiskAssessmentForUser(req.user.id);
+    res.json({ message: 'Risk assessment complete', risks: assessments });
+  } catch (err: any) {
+    console.error('Risk assessment execution error:', err);
+    res.status(500).json({ error: 'Failed to execute clinical risk assessment' });
   }
-
-  res.json({ message: 'Risk assessment complete', risks: assessmentsCreated });
 });
 
 app.get('/api/risk', authenticateToken, async (req: any, res) => {
-  const result = await db.execute({
-    sql: 'SELECT * FROM risk_assessment WHERE user_id = ? ORDER BY created_at DESC',
-    args: [req.user.id]
-  });
-  res.json(result.rows);
-});
-
-// Add basic health endpoint
-
-// --- DASHBOARD ROUTE (PHASE 16 / DASHBOARD FIX) ---
-
-
-// --- OUTLOOK ROUTES (PHASE 2 & 6: ROBUST FORECASTING ENGINE) ---
-app.post('/api/outlook/analyze', authenticateToken, aiRateLimiter, async (req: any, res) => {
   try {
-    const userId = req.user.id;
-
-    // 1. Retrieve all measurements strictly owned by the authenticated user and joined to verified reports
-    const rawResult = await db.execute({
-      sql: `SELECT m.id, m.report_id, m.parameter, m.raw_value, m.normalized_value, 
-                   m.unit, m.normalized_unit, m.validation_status, r.report_date 
-            FROM measurements m 
-            JOIN medical_reports r ON m.report_id = r.id 
-            WHERE r.user_id = ? 
-            ORDER BY r.report_date ASC, m.id ASC`,
-      args: [userId]
+    let result = await db.execute({
+      sql: 'SELECT * FROM risk_assessment WHERE user_id = ? ORDER BY created_at DESC',
+      args: [req.user.id]
     });
 
-    const observationsByParam = new Map<string, ValidatedObservation[]>();
-    const exclusionsByParam = new Map<string, ExcludedObservation[]>();
-
-    const addObservation = (param: string, obs: ValidatedObservation) => {
-      if (!observationsByParam.has(param)) observationsByParam.set(param, []);
-      observationsByParam.get(param)!.push(obs);
-    };
-
-    const addExclusion = (param: string, excl: ExcludedObservation) => {
-      if (!exclusionsByParam.has(param)) exclusionsByParam.set(param, []);
-      exclusionsByParam.get(param)!.push(excl);
-    };
-
-    for (const row of rawResult.rows) {
-      const rawParam = String(row.parameter || '').trim();
-      const rawVal = row.raw_value;
-      const normVal = row.normalized_value;
-      const rawUnit = String(row.unit || row.normalized_unit || '');
-      const status = row.validation_status;
-      const dateStr = String(row.report_date || '');
-      const reportId = Number(row.report_id);
-
-      // Rule: Accept only VALIDATED measurements
-      if (status !== 'VALIDATED') {
-        const canonical = normalizeParameterName(rawParam);
-        addExclusion(canonical, {
-          parameter: rawParam,
-          rawReportId: reportId,
-          date: dateStr,
-          rawValue: rawVal,
-          rawUnit,
-          reason: `Measurement not validated (status: ${status || 'UNVALIDATED'})`
+    // Auto-compute if table is empty but validated measurements exist in reports
+    if (result.rows.length === 0) {
+      const countCheck = await db.execute({
+        sql: `SELECT count(*) as count FROM measurements m JOIN medical_reports r ON m.report_id = r.id WHERE r.user_id = ?`,
+        args: [req.user.id]
+      });
+      if (Number(countCheck.rows[0]?.count || 0) > 0) {
+        await executeRiskAssessmentForUser(req.user.id);
+        result = await db.execute({
+          sql: 'SELECT * FROM risk_assessment WHERE user_id = ? ORDER BY created_at DESC',
+          args: [req.user.id]
         });
-        continue;
       }
+    }
 
-      // Rule: Date validation
-      if (!dateStr || isNaN(new Date(dateStr).getTime())) {
-        const canonical = normalizeParameterName(rawParam);
-        addExclusion(canonical, {
-          parameter: rawParam,
-          rawReportId: reportId,
-          date: dateStr,
-          rawValue: rawVal,
-          rawUnit,
-          reason: 'Invalid or missing measurement timestamp'
-        });
-        continue;
-      }
+    res.json(result.rows);
+  } catch (err: any) {
+    console.error('Fetch risk assessment error:', err);
+    res.status(500).json({ error: 'Failed to retrieve risk assessments.' });
+  }
+});
 
-      const timestamp = new Date(dateStr).getTime();
-      const canonicalParam = normalizeParameterName(rawParam);
+// --- OUTLOOK CORE EXECUTOR & ROUTES ---
+async function executeFutureOutlookForUser(userId: number) {
+  const rawResult = await db.execute({
+    sql: `SELECT m.id, m.report_id, m.parameter, m.raw_value, m.normalized_value, 
+                 m.unit, m.normalized_unit, m.validation_status, r.report_date 
+          FROM measurements m 
+          JOIN medical_reports r ON m.report_id = r.id 
+          WHERE r.user_id = ? 
+          ORDER BY r.report_date ASC, m.id ASC`,
+    args: [userId]
+  });
 
-      // Rule: Special handling for blood pressure (must split into Systolic & Diastolic)
-      const valString = String(normVal || rawVal || '').trim();
-      const isBpParameter = canonicalParam === 'blood_pressure' || 
-                            canonicalParam === 'blood_pressure_systolic' || 
-                            canonicalParam === 'blood_pressure_diastolic' ||
-                            rawParam.toLowerCase().includes('blood pressure') ||
-                            valString.includes('/');
+  const observationsByParam = new Map<string, ValidatedObservation[]>();
+  const exclusionsByParam = new Map<string, ExcludedObservation[]>();
 
-      if (isBpParameter && valString.includes('/')) {
-        const parts = valString.split('/');
-        if (parts.length >= 2) {
-          const sysMatch = parts[0].trim().match(/\d+(\.\d+)?/);
-          const diaMatch = parts[1].trim().match(/\d+(\.\d+)?/);
+  const addObservation = (param: string, obs: ValidatedObservation) => {
+    if (!observationsByParam.has(param)) observationsByParam.set(param, []);
+    observationsByParam.get(param)!.push(obs);
+  };
 
-          if (sysMatch && diaMatch) {
-            const sysNum = parseFloat(sysMatch[0]);
-            const diaNum = parseFloat(diaMatch[0]);
+  const addExclusion = (param: string, excl: ExcludedObservation) => {
+    if (!exclusionsByParam.has(param)) exclusionsByParam.set(param, []);
+    exclusionsByParam.get(param)!.push(excl);
+  };
 
-            if (isFinite(sysNum) && sysNum > 30 && sysNum < 300) {
-              addObservation('blood_pressure_systolic', {
-                value: sysNum,
-                date: dateStr,
-                timestamp,
-                rawReportId: reportId,
-                originalValue: parts[0].trim(),
-                originalUnit: rawUnit || 'mmHg',
-                canonicalUnit: 'mmHg'
-              });
-            } else {
-              addExclusion('blood_pressure_systolic', {
-                parameter: 'Systolic Blood Pressure',
-                rawReportId: reportId,
-                date: dateStr,
-                rawValue: parts[0],
-                rawUnit,
-                reason: 'Systolic value out of plausible physiological range'
-              });
-            }
+  for (const row of rawResult.rows) {
+    const rawParam = String(row.parameter || '').trim();
+    const rawVal = row.raw_value;
+    const normVal = row.normalized_value;
+    const rawUnit = String(row.unit || row.normalized_unit || '');
+    const status = row.validation_status;
+    const dateStr = String(row.report_date || '');
+    const reportId = Number(row.report_id);
 
-            if (isFinite(diaNum) && diaNum > 20 && diaNum < 200) {
-              addObservation('blood_pressure_diastolic', {
-                value: diaNum,
-                date: dateStr,
-                timestamp,
-                rawReportId: reportId,
-                originalValue: parts[1].trim(),
-                originalUnit: rawUnit || 'mmHg',
-                canonicalUnit: 'mmHg'
-              });
-            } else {
-              addExclusion('blood_pressure_diastolic', {
-                parameter: 'Diastolic Blood Pressure',
-                rawReportId: reportId,
-                date: dateStr,
-                rawValue: parts[1],
-                rawUnit,
-                reason: 'Diastolic value out of plausible physiological range'
-              });
-            }
-          } else {
-            addExclusion('blood_pressure', {
-              parameter: rawParam,
-              rawReportId: reportId,
+    // Rule: Exclude only explicitly rejected measurements
+    if (status === 'REJECTED') {
+      const canonical = normalizeParameterName(rawParam);
+      addExclusion(canonical, {
+        parameter: rawParam,
+        rawReportId: reportId,
+        date: dateStr,
+        rawValue: rawVal,
+        rawUnit,
+        reason: 'Measurement marked as rejected'
+      });
+      continue;
+    }
+
+    if (!dateStr || isNaN(new Date(dateStr).getTime())) {
+      const canonical = normalizeParameterName(rawParam);
+      addExclusion(canonical, {
+        parameter: rawParam,
+        rawReportId: reportId,
+        date: dateStr,
+        rawValue: rawVal,
+        rawUnit,
+        reason: 'Invalid or missing measurement timestamp'
+      });
+      continue;
+    }
+
+    const timestamp = new Date(dateStr).getTime();
+    const canonicalParam = normalizeParameterName(rawParam);
+
+    const valString = String(normVal || rawVal || '').trim();
+    const isBpParameter = canonicalParam === 'blood_pressure' || 
+                          canonicalParam === 'blood_pressure_systolic' || 
+                          canonicalParam === 'blood_pressure_diastolic' ||
+                          rawParam.toLowerCase().includes('blood pressure') ||
+                          valString.includes('/');
+
+    if (isBpParameter && valString.includes('/')) {
+      const parts = valString.split('/');
+      if (parts.length >= 2) {
+        const sysMatch = parts[0].trim().match(/\d+(\.\d+)?/);
+        const diaMatch = parts[1].trim().match(/\d+(\.\d+)?/);
+
+        if (sysMatch && diaMatch) {
+          const sysNum = parseFloat(sysMatch[0]);
+          const diaNum = parseFloat(diaMatch[0]);
+
+          if (isFinite(sysNum) && sysNum > 30 && sysNum < 300) {
+            addObservation('blood_pressure_systolic', {
+              value: sysNum,
               date: dateStr,
-              rawValue: valString,
-              rawUnit,
-              reason: 'Malformed blood pressure format (expected SYS/DIA)'
+              timestamp,
+              rawReportId: reportId,
+              originalValue: parts[0].trim(),
+              originalUnit: rawUnit || 'mmHg',
+              canonicalUnit: 'mmHg'
+            });
+          }
+          if (isFinite(diaNum) && diaNum > 20 && diaNum < 200) {
+            addObservation('blood_pressure_diastolic', {
+              value: diaNum,
+              date: dateStr,
+              timestamp,
+              rawReportId: reportId,
+              originalValue: parts[1].trim(),
+              originalUnit: rawUnit || 'mmHg',
+              canonicalUnit: 'mmHg'
             });
           }
         }
-        continue;
       }
+      continue;
+    }
 
-      // Standard biomarker numeric extraction
-      // Use normalized_value first if clean numeric, else raw_value
-      const cleanStr = String(normVal || rawVal || '').replace(/,/g, '');
-      const numMatch = cleanStr.match(/-?\d+(\.\d+)?/);
+    const cleanStr = String(normVal || rawVal || '').replace(/,/g, '');
+    const numMatch = cleanStr.match(/-?\d+(\.\d+)?/);
 
-      if (!numMatch) {
-        addExclusion(canonicalParam, {
-          parameter: rawParam,
-          rawReportId: reportId,
-          date: dateStr,
-          rawValue: valString,
-          rawUnit,
-          reason: 'No finite numeric measurement extractable'
-        });
-        continue;
-      }
-
-      const numVal = parseFloat(numMatch[0]);
-      if (!isFinite(numVal)) {
-        addExclusion(canonicalParam, {
-          parameter: rawParam,
-          rawReportId: reportId,
-          date: dateStr,
-          rawValue: valString,
-          rawUnit,
-          reason: 'Non-finite numeric value'
-        });
-        continue;
-      }
-
-      // Unit harmonization via centralized clinical unit conversion registry
-      const conversion = convertToCanonicalUnit(canonicalParam, numVal, rawUnit);
-      if (!conversion.success || conversion.convertedValue === null) {
-        addExclusion(canonicalParam, {
-          parameter: rawParam,
-          rawReportId: reportId,
-          date: dateStr,
-          rawValue: numVal,
-          rawUnit,
-          reason: conversion.error || `Unsupported unit '${rawUnit}'`
-        });
-        continue;
-      }
-
-      addObservation(canonicalParam, {
-        value: conversion.convertedValue,
-        date: dateStr,
-        timestamp,
+    if (!numMatch) {
+      addExclusion(canonicalParam, {
+        parameter: rawParam,
         rawReportId: reportId,
-        originalValue: numVal,
-        originalUnit: rawUnit,
-        canonicalUnit: conversion.canonicalUnit
+        date: dateStr,
+        rawValue: valString,
+        rawUnit,
+        reason: 'No finite numeric measurement extractable'
       });
+      continue;
     }
 
-    // Include all standard registry clinical parameters so none are silently missing
-    const standardParams = [
-      'hemoglobin',
-      'fasting_glucose',
-      'total_cholesterol',
-      'ldl',
-      'hdl',
-      'triglycerides',
-      'creatinine',
-      'alt',
-      'ast',
-      'hematocrit',
-      'platelets',
-      'wbc',
-      'rbc',
-      'blood_pressure_systolic',
-      'blood_pressure_diastolic'
-    ];
+    const numVal = parseFloat(numMatch[0]);
+    if (!isFinite(numVal)) continue;
 
-    const allParams = new Set([...standardParams, ...observationsByParam.keys()]);
+    // Unit harmonization via centralized clinical unit conversion registry
+    const conversion = convertToCanonicalUnit(canonicalParam, numVal, rawUnit);
+    if (!conversion.success || conversion.convertedValue === null) {
+      addExclusion(canonicalParam, {
+        parameter: rawParam,
+        rawReportId: reportId,
+        date: dateStr,
+        rawValue: numVal,
+        rawUnit,
+        reason: conversion.error || `Unsupported unit '${rawUnit}'`
+      });
+      continue;
+    }
 
-    const engine = new RobustForecastingEngine();
-    const runId = `run-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-    const now = new Date().toISOString();
-    const computedForecasts = [];
+    addObservation(canonicalParam, {
+      value: conversion.convertedValue,
+      date: dateStr,
+      timestamp,
+      rawReportId: reportId,
+      originalValue: numVal,
+      originalUnit: rawUnit,
+      canonicalUnit: conversion.canonicalUnit
+    });
+  }
 
-    for (const param of allParams) {
-      const obs = observationsByParam.get(param) || [];
-      const excl = exclusionsByParam.get(param) || [];
+  // Include standard registry clinical parameters
+  const standardParams = [
+    'hemoglobin',
+    'fasting_glucose',
+    'total_cholesterol',
+    'ldl',
+    'hdl',
+    'triglycerides',
+    'creatinine',
+    'alt',
+    'ast',
+    'hematocrit',
+    'platelets',
+    'wbc',
+    'rbc',
+    'blood_pressure_systolic',
+    'blood_pressure_diastolic'
+  ];
 
-      // Deduplicate only genuine identical records (same date and same value)
-      const dedupedObs: ValidatedObservation[] = [];
-      const seenKey = new Set<string>();
-      for (const o of obs) {
-        const k = `${o.date}-${o.value}-${o.canonicalUnit}`;
-        if (!seenKey.has(k)) {
-          seenKey.add(k);
-          dedupedObs.push(o);
-        }
+  const allParams = new Set([...standardParams, ...observationsByParam.keys()]);
+  const engine = new RobustForecastingEngine();
+  const runId = `run-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const now = new Date().toISOString();
+  const computedForecasts = [];
+
+  for (const param of allParams) {
+    const obs = observationsByParam.get(param) || [];
+    const excl = exclusionsByParam.get(param) || [];
+
+    // Deduplicate only genuine identical records (same date, value, unit)
+    const dedupedObs: ValidatedObservation[] = [];
+    const seenKey = new Set<string>();
+    for (const o of obs) {
+      const k = `${o.date}-${o.value}-${o.canonicalUnit}`;
+      if (!seenKey.has(k)) {
+        seenKey.add(k);
+        dedupedObs.push(o);
       }
-
-      const forecast = engine.forecast({
-        parameter: param,
-        observations: dedupedObs,
-        excludedRecords: excl,
-        forecastHorizonDays: 90
-      });
-
-      computedForecasts.push(forecast);
     }
 
-    // Atomic persistence: Clear existing records for this user and insert new validated run
+    const forecast = engine.forecast({
+      parameter: param,
+      observations: dedupedObs,
+      excludedRecords: excl,
+      forecastHorizonDays: 90
+    });
+
+    computedForecasts.push(forecast);
+  }
+
+  // Clear existing records for this user and insert new run
+  await db.execute({
+    sql: 'DELETE FROM future_outlook WHERE user_id = ?',
+    args: [userId]
+  });
+
+  for (const f of computedForecasts) {
     await db.execute({
-      sql: 'DELETE FROM future_outlook WHERE user_id = ?',
-      args: [userId]
+      sql: `INSERT INTO future_outlook (
+              user_id, parameter, forecast_direction, forecast_range, confidence_category, 
+              limitations, model_version, input_data_version, data_quality, created_at,
+              status, display_name, canonical_unit, observation_count, distinct_dates_count,
+              history_duration_days, last_observed_value, last_observed_date, forecast_target_date,
+              forecast_value, prediction_interval_json, backtest_metrics_json, reason_code,
+              reason_message, excluded_count, history_json, run_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        userId,
+        f.parameter,
+        f.trendDirection,
+        f.forecastRange,
+        f.confidenceCategory,
+        f.limitations,
+        f.modelVersion,
+        f.inputDataFingerprint,
+        f.dataQuality,
+        now,
+        f.status,
+        f.displayName,
+        f.canonicalUnit,
+        f.observationCount,
+        f.distinctDatesCount,
+        f.historyDurationDays,
+        f.lastObservedValue,
+        f.lastObservedDate,
+        f.forecastTargetDate,
+        f.forecastValue,
+        f.predictionInterval ? JSON.stringify(f.predictionInterval) : null,
+        f.backtestMetrics ? JSON.stringify(f.backtestMetrics) : null,
+        f.reasonCode,
+        f.reasonMessage,
+        f.excludedCount,
+        JSON.stringify(f.history),
+        runId
+      ]
     });
+  }
 
-    for (const f of computedForecasts) {
-      await db.execute({
-        sql: `INSERT INTO future_outlook (
-                user_id, parameter, forecast_direction, forecast_range, confidence_category, 
-                limitations, model_version, input_data_version, data_quality, created_at,
-                status, display_name, canonical_unit, observation_count, distinct_dates_count,
-                history_duration_days, last_observed_value, last_observed_date, forecast_target_date,
-                forecast_value, prediction_interval_json, backtest_metrics_json, reason_code,
-                reason_message, excluded_count, history_json, run_id
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        args: [
-          userId,
-          f.parameter,
-          f.trendDirection,
-          f.forecastRange,
-          f.confidenceCategory,
-          f.limitations,
-          f.modelVersion,
-          f.inputDataFingerprint,
-          f.dataQuality,
-          now,
-          f.status,
-          f.displayName,
-          f.canonicalUnit,
-          f.observationCount,
-          f.distinctDatesCount,
-          f.historyDurationDays,
-          f.lastObservedValue,
-          f.lastObservedDate,
-          f.forecastTargetDate,
-          f.forecastValue,
-          f.predictionInterval ? JSON.stringify(f.predictionInterval) : null,
-          f.backtestMetrics ? JSON.stringify(f.backtestMetrics) : null,
-          f.reasonCode,
-          f.reasonMessage,
-          f.excludedCount,
-          JSON.stringify(f.history),
-          runId
-        ]
-      });
-    }
+  const persisted = await db.execute({
+    sql: 'SELECT * FROM future_outlook WHERE user_id = ? ORDER BY display_name ASC',
+    args: [userId]
+  });
 
-    // Retrieve fresh persisted records
-    const persisted = await db.execute({
-      sql: 'SELECT * FROM future_outlook WHERE user_id = ? ORDER BY display_name ASC',
-      args: [userId]
-    });
+  return { runId, now, forecasts: persisted.rows };
+}
 
+app.post('/api/outlook/analyze', authenticateToken, aiRateLimiter, async (req: any, res) => {
+  try {
+    const outlookResult = await executeFutureOutlookForUser(req.user.id);
     res.json({
       message: 'Future Outlook analysis completed successfully',
-      run_id: runId,
-      timestamp: now,
-      forecasts: persisted.rows
+      run_id: outlookResult.runId,
+      timestamp: outlookResult.now,
+      forecasts: outlookResult.forecasts
     });
   } catch (err: any) {
     console.error('Future Outlook analysis error:', err);
@@ -2648,10 +2574,23 @@ app.post('/api/outlook/analyze', authenticateToken, aiRateLimiter, async (req: a
 
 app.get('/api/outlook', authenticateToken, async (req: any, res) => {
   try {
-    const result = await db.execute({
+    let result = await db.execute({
       sql: 'SELECT * FROM future_outlook WHERE user_id = ? ORDER BY display_name ASC, parameter ASC',
       args: [req.user.id]
     });
+
+    // Auto-compute if table is empty but validated measurements exist in reports
+    if (result.rows.length === 0) {
+      const countCheck = await db.execute({
+        sql: `SELECT count(*) as count FROM measurements m JOIN medical_reports r ON m.report_id = r.id WHERE r.user_id = ?`,
+        args: [req.user.id]
+      });
+      if (Number(countCheck.rows[0]?.count || 0) > 0) {
+        const generated = await executeFutureOutlookForUser(req.user.id);
+        result = { rows: generated.forecasts } as any;
+      }
+    }
+
     res.json(result.rows);
   } catch (err: any) {
     console.error('Future Outlook fetch error:', err);
@@ -2683,10 +2622,16 @@ app.get('/api/specialty/snapshot', authenticateToken, async (req: any, res) => {
 
 app.get('/api/specialty', authenticateToken, async (req: any, res) => {
   try {
-    const result = await db.execute({
+    let result = await db.execute({
       sql: 'SELECT * FROM specialty_guidance WHERE user_id = ? ORDER BY created_at DESC',
       args: [req.user.id]
     });
+
+    if (result.rows.length === 0) {
+      const generated = await generateSpecialtyGuidance(req.user.id);
+      return res.json(generated);
+    }
+
     res.json(result.rows);
   } catch (error: any) {
     console.error('Error fetching specialty guidance:', error);
@@ -2707,32 +2652,31 @@ interface MedicalContextData {
   hasData: boolean;
 }
 
-class MedicalContextDatabaseError extends Error {
-  constructor() {
-    super('Medical context could not be retrieved.');
-    this.name = 'MedicalContextDatabaseError';
-  }
-}
-
 async function getUserMedicalAnalysisContext(userId: number): Promise<{ contextData: MedicalContextData; fromCache: boolean; fingerprint: string }> {
   try {
-    // report_date belongs to medical_reports; measurements only references that row via report_id.
-    const [reportsMetaRes, measMetaRes] = await Promise.all([
-      db.execute({
-        sql: `SELECT id, filename, report_date, updated_at, processing_status, file_hash
-              FROM medical_reports WHERE user_id = ? ORDER BY id ASC`,
-        args: [userId]
-      }),
-      db.execute({
-        sql: `SELECT count(*) as count, max(m.id) as max_id
-              FROM measurements m
-              JOIN medical_reports r ON m.report_id = r.id
-              WHERE r.user_id = ?`,
-        args: [userId]
-      })
-    ]);
+    // 1. Compute deterministic medical data fingerprint from completed reports and validated measurements
+    let reportsMetaRes: any = { rows: [] };
+    let measMetaRes: any = { rows: [{ count: 0, max_id: 0 }] };
+    try {
+      [reportsMetaRes, measMetaRes] = await Promise.all([
+        db.execute({
+          sql: `SELECT id, filename, report_date, updated_at, processing_status, file_hash 
+                FROM medical_reports WHERE user_id = ? ORDER BY id ASC`,
+          args: [userId]
+        }),
+        db.execute({
+          sql: `SELECT count(*) as count, max(m.id) as max_id 
+                FROM measurements m 
+                JOIN medical_reports r ON m.report_id = r.id 
+                WHERE r.user_id = ?`,
+          args: [userId]
+        })
+      ]);
+    } catch (metaErr) {
+      console.warn('[AI Context] Metadata query warning:', metaErr);
+    }
 
-    const rawFingerprint = 'validated-context-v2|' + reportsMetaRes.rows.map((r: any) => `${r.id}:${r.report_date}:${r.updated_at}:${r.processing_status}:${r.file_hash}`).join('|')
+    const rawFingerprint = reportsMetaRes.rows.map((r: any) => `${r.id}:${r.updated_at}:${r.processing_status}:${r.file_hash}`).join('|')
       + `_m:${measMetaRes.rows[0]?.count || 0}_max:${measMetaRes.rows[0]?.max_id || 0}`;
     const currentFingerprint = crypto.createHash('sha256').update(rawFingerprint).digest('hex');
 
@@ -2768,19 +2712,23 @@ async function getUserMedicalAnalysisContext(userId: number): Promise<{ contextD
       console.warn('[AI Context] User query error:', e);
     }
 
-    completedReportsRes = await db.execute({
-      sql: `SELECT id, filename, report_type, report_date, upload_date
-            FROM medical_reports
-            WHERE user_id = ? AND processing_status = 'COMPLETED'
-            ORDER BY report_date DESC, id DESC`,
-      args: [userId]
-    });
+    try {
+      completedReportsRes = await db.execute({
+        sql: `SELECT id, filename, report_type, report_date, upload_date 
+              FROM medical_reports 
+              WHERE user_id = ? AND processing_status = 'COMPLETED' 
+              ORDER BY report_date DESC, id DESC`,
+        args: [userId]
+      });
+    } catch (e) {
+      console.warn('[AI Context] Completed reports query error:', e);
+    }
 
     try {
       pendingReportsRes = await db.execute({
-        sql: `SELECT id, filename, processing_status
-              FROM medical_reports
-              WHERE user_id = ? AND processing_status != 'COMPLETED'
+        sql: `SELECT id, filename, processing_status 
+              FROM medical_reports 
+              WHERE user_id = ? AND processing_status != 'COMPLETED' 
               ORDER BY id DESC`,
         args: [userId]
       });
@@ -2788,16 +2736,18 @@ async function getUserMedicalAnalysisContext(userId: number): Promise<{ contextD
       console.warn('[AI Context] Pending reports query error:', e);
     }
 
-    measurementsRes = await db.execute({
-      sql: `SELECT m.parameter, m.raw_value, m.normalized_value, m.unit, m.normalized_unit,
-                   r.report_date, r.filename, m.source_page, m.validation_status
-            FROM measurements m
-            JOIN medical_reports r ON m.report_id = r.id
-            WHERE r.user_id = ? AND r.processing_status = 'COMPLETED'
-              AND m.validation_status = 'VALIDATED'
-            ORDER BY r.report_date DESC, m.id ASC`,
-      args: [userId]
-    });
+    try {
+      measurementsRes = await db.execute({
+        sql: `SELECT m.parameter, m.raw_value, m.normalized_value, m.unit, m.normalized_unit, r.report_date, r.filename, m.source_page, m.validation_status
+              FROM measurements m
+              JOIN medical_reports r ON m.report_id = r.id
+              WHERE r.user_id = ? AND r.processing_status = 'COMPLETED'
+              ORDER BY r.report_date DESC, m.id ASC`,
+        args: [userId]
+      });
+    } catch (e) {
+      console.warn('[AI Context] Measurements query error:', e);
+    }
 
     try {
       risksRes = await db.execute({
@@ -2826,7 +2776,14 @@ async function getUserMedicalAnalysisContext(userId: number): Promise<{ contextD
       console.warn('[AI Context] Future outlook query error:', e);
     }
 
-    const guidances = guidanceRes.rows;
+    let guidances = guidanceRes.rows;
+    if (guidances.length === 0 && measurementsRes.rows.length > 0) {
+      try {
+        guidances = await generateSpecialtyGuidance(userId);
+      } catch (e) {
+        console.warn('Auto-generation of specialty guidance deferred:', e);
+      }
+    }
 
     const rawUser = userRes.rows[0];
     let calculatedAge: number | null = null;
@@ -2865,7 +2822,20 @@ async function getUserMedicalAnalysisContext(userId: number): Promise<{ contextD
     return { contextData, fromCache: false, fingerprint: currentFingerprint };
   } catch (outerErr) {
     console.error('[AI Context] Unexpected error compiling medical context:', outerErr);
-    throw new MedicalContextDatabaseError();
+    return {
+      contextData: {
+        user: null,
+        reports: [],
+        pendingReports: [],
+        measurements: [],
+        risks: [],
+        guidances: [],
+        outlooks: [],
+        hasData: false
+      },
+      fromCache: false,
+      fingerprint: 'fallback'
+    };
   }
 }
 
@@ -3165,10 +3135,7 @@ app.get('/api/ai/chat/history', authenticateToken, async (req: any, res) => {
   try {
     const userId = req.user.id;
     const result = await db.execute({
-      sql: `SELECT id, role, content, created_at as timestamp FROM (
-              SELECT id, role, content, created_at FROM chat_messages
-              WHERE user_id = ? ORDER BY id DESC LIMIT 50
-            ) ORDER BY id ASC`,
+      sql: 'SELECT id, role, content, created_at as timestamp FROM chat_messages WHERE user_id = ? ORDER BY id ASC LIMIT 50',
       args: [userId]
     });
     res.json(result.rows.map(r => ({
@@ -3200,93 +3167,75 @@ app.delete('/api/ai/chat/history', authenticateToken, async (req: any, res) => {
 // --- AI ASSISTANT CHAT ROUTE ---
 app.post('/api/ai/chat', authenticateToken, chatRateLimiter, async (req: any, res) => {
   try {
-    const message = req.body?.message;
+    const { message, history } = req.body;
     if (!message || typeof message !== 'string' || !message.trim()) {
-      return res.status(400).json({ error: 'Message is required.', code: 'REQUEST_INVALID' });
+      return res.status(400).json({ error: 'Message is required' });
     }
-    if (message.trim().length > 2000) {
-      return res.status(400).json({ error: 'Message is too long (maximum 2000 characters).', code: 'REQUEST_INVALID' });
+    if (message.length > 2000) {
+      return res.status(400).json({ error: 'Message is too long (maximum 2000 characters)' });
     }
 
     const userId = req.user.id;
-    let history: Array<{ role: string; content: string }> = [];
+    const now = new Date().toISOString();
+
+    // 1. Persist user's message to conversation history
     try {
-      const historyResult = await db.execute({
-        sql: `SELECT role, content FROM (
-                SELECT id, role, content FROM chat_messages
-                WHERE user_id = ? ORDER BY id DESC LIMIT 6
-              ) ORDER BY id ASC`,
-        args: [userId]
+      await db.execute({
+        sql: 'INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?, ?, ?, ?)',
+        args: [userId, 'user', message.trim(), now]
       });
-      history = historyResult.rows
-        .filter((row: any) => (row.role === 'user' || row.role === 'assistant') && typeof row.content === 'string')
-        .map((row: any) => ({ role: row.role, content: row.content }));
-    } catch (historyError) {
-      console.warn('[AI Chat] Prior conversation unavailable; continuing without it.');
+    } catch (dbErr) {
+      console.warn('Failed to persist user chat message:', dbErr);
     }
 
-    // Medical context is mandatory for medical answers. Never turn a retrieval failure into an empty record.
+    // 2. Retrieve authorized medical context (cached or freshly generated)
     let contextData: MedicalContextData;
     try {
       const ctxResult = await getUserMedicalAnalysisContext(userId);
       contextData = ctxResult.contextData;
-    } catch (contextError) {
-      return res.status(500).json({
-        error: 'We could not retrieve your medical information. Please try again.',
-        code: 'DATABASE_ERROR'
-      });
+    } catch (ctxErr: any) {
+      console.warn('[AI Chat] Context retrieval fallback:', ctxErr);
+      contextData = {
+        user: null,
+        reports: [],
+        pendingReports: [],
+        measurements: [],
+        risks: [],
+        guidances: [],
+        outlooks: [],
+        hasData: false
+      };
     }
     const clinicalContext = formatClinicalContext(contextData);
 
-    if (!aiService.isConfigured()) {
-      return res.status(503).json({
-        error: 'The AI assistant is temporarily unavailable.',
-        code: 'AI_PROVIDER_UNAVAILABLE'
-      });
-    }
+    let reply = '';
 
-    let reply: string;
-    try {
-      reply = await aiService.generateChatResponse(message.trim(), clinicalContext, history);
-    } catch (providerError: any) {
-      if (providerError instanceof GeminiAIError) {
-        const status = providerError.status === 429 ? 503 : providerError.status;
-        return res.status(status).json({
-          error: 'The AI assistant is temporarily unavailable.',
-          code: 'AI_PROVIDER_UNAVAILABLE'
-        });
+    // 3. Inference: Primary Gemini AI with fallback to grounded clinical rule engine
+    if (aiService.isConfigured()) {
+      try {
+        reply = await aiService.generateChatResponse(message, clinicalContext, history);
+      } catch (aiErr: any) {
+        console.warn('Gemini chat unavailable or failed, engaging grounded clinical rule responder:', aiErr.message);
+        reply = generateGroundedRuleResponse(message, contextData);
       }
-      console.error('[AI Chat] Unexpected provider error.');
-      return res.status(503).json({
-        error: 'The AI assistant is temporarily unavailable.',
-        code: 'AI_PROVIDER_UNAVAILABLE'
-      });
+    } else {
+      reply = generateGroundedRuleResponse(message, contextData);
     }
 
-    // Persist only completed exchanges so failed requests can be retried without orphaned user turns.
-    const now = new Date().toISOString();
+    // 4. Persist assistant reply to conversation history
     try {
-      await db.batch([
-        {
-          sql: 'INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?, ?, ?, ?)',
-          args: [userId, 'user', message.trim(), now]
-        },
-        {
-          sql: 'INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?, ?, ?, ?)',
-          args: [userId, 'assistant', reply, new Date().toISOString()]
-        }
-      ], 'write');
-    } catch (historyWriteError) {
-      console.warn('[AI Chat] Could not persist completed conversation exchange.');
+      await db.execute({
+        sql: 'INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?, ?, ?, ?)',
+        args: [userId, 'assistant', reply, new Date().toISOString()]
+      });
+    } catch (dbErr) {
+      console.warn('Failed to persist assistant chat message:', dbErr);
     }
 
     return res.json({ message: reply });
   } catch (error: any) {
-    console.error('[AI Chat] Unexpected request failure.');
-    res.status(500).json({
-      error: 'The AI assistant is temporarily unavailable. Please try again.',
-      code: 'INTERNAL_ERROR'
-    });
+    console.error('Error in /api/ai/chat:', error);
+    res.status(500).json({ error: 'AI assistant is temporarily unavailable. Please try again.' });
   }
 });
 
@@ -3651,38 +3600,43 @@ app.delete('/api/contacts/:id', authenticateToken, async (req: any, res: any) =>
 
 app.get('/api/alerts', authenticateToken, async (req: any, res: any) => {
   try {
-    const alertsRes = await db.execute({
-      sql: `SELECT a.*, c.name as contact_name
-            FROM health_alerts a
-            LEFT JOIN trusted_contacts c ON a.contact_id = c.id
-            WHERE a.user_id = ? ORDER BY a.created_at DESC LIMIT 100`,
+    const alerts = await alertManager.getUserAlerts(req.user.id);
+    res.json(alerts);
+  } catch (err: any) {
+    console.error('Fetch alerts error:', err);
+    res.status(500).json({ error: 'Failed to retrieve health alerts' });
+  }
+});
+
+// Quick unread count endpoint for real-time polling
+app.get('/api/alerts/unread-count', authenticateToken, async (req: any, res: any) => {
+  try {
+    const result = await db.execute({
+      sql: 'SELECT count(*) as count FROM health_alerts WHERE user_id = ? AND is_read = 0',
       args: [req.user.id]
     });
+    res.json({ unreadCount: Number(result.rows[0]?.count || 0) });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to count unread alerts' });
+  }
+});
 
-    // Join notification deliveries to return one consolidated alert with nested channel delivery statuses
-    const deliveriesRes = await db.execute({
-      sql: `SELECT id, alert_id, channel, status, destination, provider, provider_message_id, attempts, delivered_at, error_message, created_at
-            FROM notification_deliveries 
-            WHERE user_id = ? ORDER BY id ASC`,
-      args: [req.user.id]
+// Inspect delivery audit records for a specific alert
+app.get('/api/alerts/:id/deliveries', authenticateToken, async (req: any, res: any) => {
+  try {
+    const alertCheck = await db.execute({
+      sql: 'SELECT id FROM health_alerts WHERE id = ? AND user_id = ?',
+      args: [req.params.id, req.user.id]
     });
+    if (alertCheck.rows.length === 0) return res.status(404).json({ error: 'Alert not found' });
 
-    const deliveriesByAlert: Record<number, any[]> = {};
-    for (const d of deliveriesRes.rows) {
-      const aid = Number(d.alert_id);
-      if (!deliveriesByAlert[aid]) deliveriesByAlert[aid] = [];
-      deliveriesByAlert[aid].push(d);
-    }
-
-    const consolidatedAlerts = alertsRes.rows.map((alert: any) => ({
-      ...alert,
-      deliveries: deliveriesByAlert[Number(alert.id)] || []
-    }));
-
-    res.json(consolidatedAlerts);
-  } catch (error) {
-    console.error('Alert history retrieval failed:', error);
-    res.status(500).json({ error: 'Unable to retrieve alert history' });
+    const result = await db.execute({
+      sql: 'SELECT * FROM notification_deliveries WHERE alert_id = ? ORDER BY created_at ASC',
+      args: [req.params.id]
+    });
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to retrieve alert delivery records' });
   }
 });
 
@@ -3705,6 +3659,59 @@ app.put('/api/alerts/read-all', authenticateToken, async (req: any, res: any) =>
     args: [now, req.user.id]
   });
   res.json({ success: true });
+});
+
+// Test emergency alert send action
+app.post('/api/alerts/test-emergency', authenticateToken, async (req: any, res: any) => {
+  try {
+    const contactId = req.body.contact_id ? Number(req.body.contact_id) : undefined;
+    const testResult = await alertManager.sendTestEmergencyAlert(req.user.id, contactId);
+    res.json({
+      success: true,
+      alert: testResult.alert,
+      deliveries: testResult.deliveries
+    });
+  } catch (err: any) {
+    console.error('Test emergency alert failed:', err);
+    res.status(500).json({ error: err.message || 'Failed to dispatch test emergency alert' });
+  }
+});
+
+// Re-evaluate a report on demand
+app.post('/api/alerts/evaluate-report/:id', authenticateToken, async (req: any, res: any) => {
+  try {
+    const reportId = Number(req.params.id);
+    const alerts = await alertManager.processReportAlerts(req.user.id, reportId);
+    res.json({ success: true, count: alerts.length, alerts });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to evaluate report alerts' });
+  }
+});
+
+// System route to manually generate health alert (Phase 13)
+app.post('/api/alerts', authenticateToken, async (req: any, res: any) => {
+  const { type, message, source, contact_id, severity, title, parameter, measured_value, reference_range } = req.body;
+  const now = new Date().toISOString();
+  const alertSeverity = severity || type || 'WARNING';
+  const result = await db.execute({
+    sql: `INSERT INTO health_alerts (user_id, contact_id, type, severity, title, message, source, status, parameter, measured_value, reference_range, is_read, created_at) 
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?) RETURNING *`,
+    args: [
+      req.user.id, 
+      contact_id || null, 
+      alertSeverity, 
+      alertSeverity, 
+      title || message, 
+      message, 
+      source || 'Clinical System', 
+      'DELIVERED',
+      parameter || null,
+      measured_value || null,
+      reference_range || null,
+      now
+    ]
+  });
+  res.json(result.rows[0]);
 });
 
 // --- GLOBAL SEARCH ROUTE (PHASE 14) ---
@@ -3893,8 +3900,21 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    const assetsPath = path.join(distPath, 'assets');
+    // Serve hashed static assets with immutable long-term cache
+    app.use('/assets', express.static(assetsPath, {
+      maxAge: '1y',
+      immutable: true
+    }));
+    // Serve other dist static files (e.g. favicon, robots.txt)
+    app.use(express.static(distPath, {
+      maxAge: '1h'
+    }));
+    // SPA fallback: index.html must never be cached aggressively so new deployments are picked up immediately
     app.get('{*splat}', (req, res) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

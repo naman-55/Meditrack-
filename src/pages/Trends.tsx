@@ -15,6 +15,7 @@ import TrendsHeader, { DateRangePreset, PanelViewMode } from '../components/Tren
 import TrendsSummaryStats, { SummaryStatsData } from '../components/Trends/TrendsSummaryStats';
 import MetricCard, { MetricCardData, ObservationPoint } from '../components/Trends/MetricCard';
 import MetricDetailModal from '../components/Trends/MetricDetailModal';
+import { Skeleton } from '../components/common/Skeleton';
 import { 
   normalizeParamKey, 
   CLINICAL_REFERENCE_RANGES, 
@@ -496,26 +497,26 @@ export default function Trends() {
           {[1, 2, 3, 4, 5].map((i) => (
             <div
               key={i}
-              className={`bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs h-80 animate-pulse flex flex-col justify-between ${
+              className={`bg-white dark:bg-[#0D1B2A] rounded-2xl border border-slate-200/80 dark:border-[#20364A] p-6 shadow-xs h-80 flex flex-col justify-between ${
                 i <= 3 ? 'lg:col-span-2' : 'lg:col-span-3'
               }`}
             >
               <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-xl bg-slate-200" />
+                <Skeleton className="w-11 h-11 rounded-xl shrink-0" />
                 <div className="space-y-2 flex-1">
-                  <div className="h-4 w-28 bg-slate-200 rounded" />
-                  <div className="h-3 w-16 bg-slate-200 rounded" />
+                  <Skeleton className="h-4 w-28 rounded" />
+                  <Skeleton className="h-3 w-16 rounded" />
                 </div>
               </div>
-              <div className="h-28 bg-slate-100 rounded-xl my-4" />
+              <Skeleton className="h-28 rounded-xl my-4" />
               <div className="grid grid-cols-2 gap-3">
-                <div className="h-12 bg-slate-100 rounded-xl" />
-                <div className="h-12 bg-slate-100 rounded-xl" />
+                <Skeleton className="h-12 rounded-xl" />
+                <Skeleton className="h-12 rounded-xl" />
               </div>
             </div>
           ))}
         </div>
-      ) : displayedCards.length === 0 ? (
+      ) : error && displayedCards.length === 0 ? null : displayedCards.length === 0 ? (
         /* Empty State */
         <div className="bg-white rounded-3xl p-12 text-center shadow-xs border border-slate-200/90 max-w-xl mx-auto my-8">
           <div className="w-16 h-16 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto mb-4">

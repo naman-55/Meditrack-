@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { adminService } from '../../api/admin';
 import { User } from '../../api/auth';
 import { UsersRound, Search, Shield, Ban, CheckCircle } from 'lucide-react';
+import { Skeleton } from '../../components/common/Skeleton';
 
 export default function AdminUsers() {
   const [users, setUsers] = useState<User[]>([]);
@@ -76,9 +77,25 @@ export default function AdminUsers() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr>
-                  <td colSpan={4} className="px-6 py-8 text-center text-slate-500">Loading users...</td>
-                </tr>
+                Array.from({ length: 4 }).map((_, i) => (
+                  <tr key={i}>
+                    <td className="px-6 py-4">
+                      <div className="space-y-1.5">
+                        <Skeleton className="h-4 w-32 rounded" />
+                        <Skeleton className="h-3 w-44 rounded" />
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <Skeleton className="h-6 w-16 rounded-md" />
+                    </td>
+                    <td className="px-6 py-4">
+                      <Skeleton className="h-6 w-20 rounded-md" />
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <Skeleton className="h-7 w-24 rounded-lg ml-auto" />
+                    </td>
+                  </tr>
+                ))
               ) : filteredUsers.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="px-6 py-8 text-center text-slate-500">No users found.</td>

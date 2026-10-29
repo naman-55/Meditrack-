@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { BarChart2, Database, Calendar, TrendingUp, HelpCircle } from 'lucide-react';
+import { MetricCardSkeleton } from '../common/Skeleton';
 
 export interface SummaryStatsData {
   metricsTrackedCount: number;
@@ -22,16 +23,7 @@ export default function TrendsSummaryStats({ stats, isLoading = false }: TrendsS
     return (
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[1, 2, 3, 4].map((i) => (
-          <div 
-            key={i} 
-            className="bg-white rounded-2xl border border-slate-200/80 p-4 sm:p-5 shadow-xs flex items-center gap-3.5 animate-pulse"
-          >
-            <div className="w-12 h-12 rounded-xl bg-slate-200 shrink-0" />
-            <div className="space-y-2 flex-1">
-              <div className="h-6 w-16 bg-slate-200 rounded" />
-              <div className="h-3 w-24 bg-slate-200 rounded" />
-            </div>
-          </div>
+          <MetricCardSkeleton key={i} />
         ))}
       </div>
     );

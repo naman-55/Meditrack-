@@ -209,7 +209,7 @@ export default function TrendsHeader({
           title="Export displayed longitudinal health analytics to PDF"
         >
           {isExporting ? (
-            <RefreshCw className="w-4 h-4 animate-spin text-indigo-600" />
+            <span className="w-2 h-2 rounded-full bg-indigo-600 animate-pulse mr-1" />
           ) : (
             <Download className="w-4 h-4 text-slate-600" />
           )}
@@ -226,7 +226,7 @@ export default function TrendsHeader({
         >
           {isAnalyzing ? (
             <>
-              <RefreshCw className="w-4 h-4 animate-spin" />
+              <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
               <span>Analyzing...</span>
             </>
           ) : (

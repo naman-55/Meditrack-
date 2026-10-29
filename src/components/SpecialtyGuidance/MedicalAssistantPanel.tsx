@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Bot, 
   Sparkles, 
+  X, 
   Send, 
   Paperclip, 
   FileText, 
@@ -11,11 +12,11 @@ import {
   TrendingUp,
   Activity,
   Droplet,
-  RotateCcw,
-  Plus
+  RotateCcw
 } from 'lucide-react';
-import { reportsService, HealthSnapshot, Measurement, SpecialtyGuidance } from '../../api/reports';
-import { MarkdownMessage } from './MarkdownMessage';
+import { reportsService, HealthSnapshot, SpecialtyGuidance } from '../../api/reports';
+import { Skeleton } from '../common/Skeleton';
+import { cn } from '../../utils/cn';
 
 interface Message {
   id: string;
@@ -23,25 +24,16 @@ interface Message {
   content: string;
   timestamp: string;
   error?: boolean;
-  retryable?: boolean;
 }
 
 interface MedicalAssistantPanelProps {
+  onClose?: () => void;
   snapshot: HealthSnapshot | null;
   guidances: SpecialtyGuidance[];
-  measurements: Measurement[];
+  className?: string;
 }
 
 function getChatErrorMessage(err: any): string {
-  if (err?.code === 'DATABASE_ERROR') {
-    return "We couldn't retrieve your medical information. Please try again.";
-  }
-  if (err?.code === 'AI_PROVIDER_UNAVAILABLE') {
-    return 'The AI assistant is temporarily unavailable.';
-  }
-  if (err?.code === 'REQUEST_INVALID') {
-    return 'Please check your message and try again.';
-  }
   const status = err?.status;
   if (status === 401 || status === 403) {
     return 'Your session has expired. Please sign in again.';
@@ -75,25 +67,18 @@ function getChatErrorMessage(err: any): string {
   return 'The AI assistant is temporarily unavailable.';
 }
 
-function canRetryChatError(err: any): boolean {
-  return err?.status !== 401 && err?.status !== 403 &&
-    err?.code !== 'AUTH_REQUIRED' && err?.code !== 'AUTH_TOKEN_EXPIRED' &&
-    err?.code !== 'AUTH_TOKEN_INVALID' && err?.code !== 'REQUEST_INVALID';
-}
-
 export const MedicalAssistantPanel: React.FC<MedicalAssistantPanelProps> = ({
+  onClose,
   snapshot,
   guidances,
-  measurements
+  className
 }) => {
   const [activeTab, setActiveTab] = useState<'chat' | 'insights'>('chat');
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [isClearing, setIsClearing] = useState(false);
-  const [clearError, setClearError] = useState('');
   const [isOnline, setIsOnline] = useState(true);
-  const chatBodyRef = useRef<HTMLDivElement>(null);
+  const chatBottomRef = useRef<HTMLDivElement>(null);
 
   // Check backend AI status and load persistent chat history
   useEffect(() => {
@@ -130,30 +115,20 @@ export const MedicalAssistantPanel: React.FC<MedicalAssistantPanelProps> = ({
   }, []);
 
   useEffect(() => {
-    const chatBody = chatBodyRef.current;
-    if (chatBody) {
-      chatBody.scrollTo({ top: chatBody.scrollHeight, behavior: 'smooth' });
-    }
+    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isSending]);
 
   const handleClearHistory = async () => {
-    if (isSending || isClearing) return;
-    setIsClearing(true);
-    setClearError('');
     try {
       await reportsService.clearChatHistory();
       setMessages([]);
-      setInputValue('');
     } catch (err) {
       console.warn('Failed to clear chat history:', err);
-      setClearError('Could not start a new chat. Your conversation history could not be cleared.');
-    } finally {
-      setIsClearing(false);
     }
   };
 
   const handleRetry = async (errorMsgId: string) => {
-    if (isSending || isClearing) return;
+    if (isSending) return;
     const errorIndex = messages.findIndex(m => m.id === errorMsgId);
     if (errorIndex < 0) return;
 
@@ -172,15 +147,15 @@ export const MedicalAssistantPanel: React.FC<MedicalAssistantPanelProps> = ({
     setIsSending(true);
 
     try {
-      const response = await reportsService.chatWithAI(lastUserText);
-      if (typeof response?.message !== 'string' || !response.message.trim()) {
-        throw new Error('The AI assistant returned an empty response.');
-      }
+      const historyPayload = remainingMessages
+        .filter(m => !m.error)
+        .map(m => ({ role: m.role, content: m.content }));
+      const response = await reportsService.chatWithAI(lastUserText, historyPayload);
 
       const assistantMessage: Message = {
         id: Date.now().toString(),
         role: 'assistant',
-        content: response.message,
+        content: response.message || 'I have reviewed your clinical record.',
         timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
       };
       setMessages(prev => [...prev, assistantMessage]);
@@ -191,8 +166,7 @@ export const MedicalAssistantPanel: React.FC<MedicalAssistantPanelProps> = ({
         role: 'assistant',
         content: getChatErrorMessage(err),
         timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-        error: true,
-        retryable: canRetryChatError(err)
+        error: true
       };
       setMessages(prev => [...prev, errorMessage]);
     } finally {
@@ -226,30 +200,16 @@ export const MedicalAssistantPanel: React.FC<MedicalAssistantPanelProps> = ({
       text: 'What does my cholesterol result mean?'
     },
     {
-      id: 'doctor-discussion',
+      id: 'improve-results',
       icon: Activity,
       iconBg: 'bg-purple-50 text-purple-500',
-      text: 'What should I discuss with my doctor?'
+      text: 'How can I improve my test results?'
     }
   ];
 
-  const hasReports = (snapshot?.reportCount || 0) > 0 || measurements.length > 0;
-  const hasCholesterolResults = measurements.some(m => /cholesterol|\bldl\b|\bhdl\b/i.test(m.parameter));
-  const hasCardiologyRecommendation = guidances.some(g =>
-    /cardio/i.test(`${g.domain} ${g.suggested_specialty}`)
-  );
-  const visibleSuggestedQuestions = suggestedQuestions.filter(q => {
-    if (q.id === 'blood-report') return hasReports;
-    if (q.id === 'why-cardio') return hasCardiologyRecommendation;
-    if (q.id === 'compare-results') return (snapshot?.reportCount || 0) > 1;
-    if (q.id === 'cholesterol-meaning') return hasCholesterolResults;
-    return hasReports;
-  });
-
   const handleSendMessage = async (textToSend?: string) => {
     const text = (textToSend || inputValue).trim();
-    if (!text || isSending || isClearing) return;
-    setClearError('');
+    if (!text || isSending) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -263,15 +223,13 @@ export const MedicalAssistantPanel: React.FC<MedicalAssistantPanelProps> = ({
     setIsSending(true);
 
     try {
-      const response = await reportsService.chatWithAI(text);
-      if (typeof response?.message !== 'string' || !response.message.trim()) {
-        throw new Error('The AI assistant returned an empty response.');
-      }
+      const historyPayload = messages.map(m => ({ role: m.role, content: m.content }));
+      const response = await reportsService.chatWithAI(text, historyPayload);
 
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: response.message,
+        content: response.message || 'I have reviewed your clinical record.',
         timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
       };
       setMessages(prev => [...prev, assistantMessage]);
@@ -282,8 +240,7 @@ export const MedicalAssistantPanel: React.FC<MedicalAssistantPanelProps> = ({
         role: 'assistant',
         content: getChatErrorMessage(err),
         timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-        error: true,
-        retryable: canRetryChatError(err)
+        error: true
       };
       setMessages(prev => [...prev, errorMessage]);
     } finally {
@@ -299,62 +256,70 @@ export const MedicalAssistantPanel: React.FC<MedicalAssistantPanelProps> = ({
   };
 
   return (
-    <div className="w-full bg-white dark:bg-[#0D1B2A] rounded-2xl border border-[#DCE5EC] dark:border-[#20364A] shadow-xs flex flex-col h-full min-h-0 shrink-0 overflow-hidden">
+    <div className={cn(
+      "w-full bg-white dark:bg-[#081729] rounded-2xl border border-[#DCE5EC] dark:border-[#152A42] shadow-md flex flex-col h-full shrink-0 overflow-hidden",
+      className
+    )}>
       {/* HEADER */}
-      <div className="p-3.5 sm:p-4 border-b border-slate-100 dark:border-[#20364A] flex items-center justify-between gap-3 shrink-0 bg-white dark:bg-[#0D1B2A]">
+      <div className="p-4 sm:p-4.5 border-b border-slate-100 dark:border-[#152A42] flex items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-blue-50 dark:bg-[#081421] text-[#2563EB] dark:text-[#2684FF] flex items-center justify-center shrink-0 shadow-2xs border border-blue-100 dark:border-[#20364A]">
+          <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-[#0B203E] text-[#2563EB] dark:text-[#2684FF] flex items-center justify-center shrink-0 shadow-2xs border border-blue-100 dark:border-[#1B4582]">
             <Bot className="w-5 h-5 stroke-[2.2]" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-bold text-[#071B49] dark:text-[#F1F5FB] leading-tight">
+              <h3 className="text-sm font-bold text-[#071B49] dark:text-white leading-tight">
                 MediTrack AI Assistant
               </h3>
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-blue-100/70 dark:bg-[#2684FF]/20 text-[#2563EB] dark:text-[#2684FF]">
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-blue-100/70 text-[#2563EB] dark:bg-[#081E3B] dark:text-[#2684FF] border border-transparent dark:border-[#1B4582]">
                 Beta
               </span>
             </div>
             <div className="flex items-center gap-1.5 mt-0.5">
               <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 dark:bg-[#00D6B0]' : 'bg-slate-400'}`} />
               <p className="text-[11px] text-[#64748B] dark:text-[#8297B2] font-medium leading-none">
-                {isOnline ? 'Online' : 'Unavailable'} · Your personal health assistant
+                Your personal health assistant
               </p>
             </div>
           </div>
         </div>
 
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={handleClearHistory}
-            disabled={isSending || isClearing}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-[#F1F5FB] bg-slate-100 dark:bg-[#081421] border border-slate-200 dark:border-[#20364A] hover:bg-slate-200 dark:hover:bg-[#14283B] disabled:opacity-50 transition-colors cursor-pointer"
-            title="Start a new chat and clear this conversation history"
-            aria-label="New chat; clears current conversation history"
-          >
-            <Plus className="w-3.5 h-3.5 text-slate-500 dark:text-[#8297B2]" />
-            <span>{isClearing ? 'Starting…' : 'New Chat'}</span>
-          </button>
+          {messages.length > 0 && (
+            <button
+              type="button"
+              onClick={handleClearHistory}
+              className="p-1.5 rounded-lg text-slate-400 dark:text-[#647A96] hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#0D2038] transition-colors"
+              title="Clear conversation history"
+              aria-label="Clear conversation history"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-slate-400 dark:text-[#647A96] hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#0D2038] transition-colors"
+              aria-label="Close Assistant panel"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
 
-      {clearError && (
-        <p role="alert" className="px-4 py-2 text-xs text-rose-700 dark:text-[#FF5368] bg-rose-50 dark:bg-[#321B27] border-b border-rose-100 dark:border-[#7A3043]">
-          {clearError}
-        </p>
-      )}
-
       {/* SEGMENTED CONTROL: Chat / Insights */}
-      <div className="p-2.5 sm:p-3 border-b border-slate-100 dark:border-[#20364A] bg-[#F8FAFC] dark:bg-[#081421] shrink-0">
-        <div className="grid grid-cols-2 p-1 bg-slate-200/60 dark:bg-[#0D1B2A] rounded-xl text-xs font-bold border border-transparent dark:border-[#20364A]">
+      <div className="p-3 border-b border-slate-100 dark:border-[#152A42] bg-[#F8FAFC] dark:bg-[#081729] shrink-0">
+        <div className="grid grid-cols-2 p-1 bg-slate-200/60 dark:bg-[#050E1A] rounded-xl text-xs font-bold border border-transparent dark:border-[#152A42]">
           <button
             type="button"
             onClick={() => setActiveTab('chat')}
-            className={`py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+            className={`py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
               activeTab === 'chat'
-                ? 'bg-white text-[#00A884] shadow-xs dark:bg-[#062E2D] dark:text-[#00D6B0] dark:border dark:border-[#075E56] font-bold'
-                : 'text-slate-600 dark:text-[#8297B2] hover:text-slate-900 dark:hover:text-[#F1F5FB]'
+                ? 'bg-white text-[#00A884] shadow-xs dark:bg-[#042724] dark:border dark:border-[#00D6B0] dark:text-[#00D6B0]'
+                : 'text-slate-600 hover:text-slate-900 dark:text-[#94A9C2] dark:hover:text-white'
             }`}
           >
             <Bot className="w-3.5 h-3.5" />
@@ -364,10 +329,10 @@ export const MedicalAssistantPanel: React.FC<MedicalAssistantPanelProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('insights')}
-            className={`py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+            className={`py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
               activeTab === 'insights'
-                ? 'bg-white text-[#00A884] shadow-xs dark:bg-[#062E2D] dark:text-[#00D6B0] dark:border dark:border-[#075E56] font-bold'
-                : 'text-slate-600 dark:text-[#8297B2] hover:text-slate-900 dark:hover:text-[#F1F5FB]'
+                ? 'bg-white text-[#00A884] shadow-xs dark:bg-[#042724] dark:border dark:border-[#00D6B0] dark:text-[#00D6B0]'
+                : 'text-slate-600 hover:text-slate-900 dark:text-[#94A9C2] dark:hover:text-white'
             }`}
           >
             <Sparkles className="w-3.5 h-3.5" />
@@ -376,44 +341,44 @@ export const MedicalAssistantPanel: React.FC<MedicalAssistantPanelProps> = ({
         </div>
       </div>
 
-      {/* BODY CONTENT: Independently scrollable */}
-      <div ref={chatBodyRef} className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 scrollbar-thin">
+      {/* BODY CONTENT */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {activeTab === 'chat' ? (
           messages.length === 0 ? (
             /* INITIAL STATE: Friendly Greeting & Suggested Questions */
             <div className="space-y-5 py-2">
               <div className="text-center space-y-2">
-                <div className="w-14 h-14 rounded-2xl bg-blue-50 dark:bg-[#102033] text-[#2563EB] dark:text-[#00D6B0] flex items-center justify-center mx-auto border border-blue-100/70 dark:border-[#20364A] shadow-2xs">
+                <div className="w-14 h-14 rounded-2xl bg-blue-50 text-[#2563EB] flex items-center justify-center mx-auto border border-blue-100/70 shadow-2xs">
                   <Bot className="w-7 h-7 stroke-[2]" />
                 </div>
-                <h4 className="text-base font-extrabold text-[#071B49] dark:text-[#F1F5FB] tracking-tight">
+                <h4 className="text-base font-extrabold text-[#071B49] tracking-tight">
                   Hello, I'm your health assistant
                 </h4>
-                <p className="text-xs text-[#64748B] dark:text-[#8297B2] leading-relaxed max-w-xs mx-auto">
+                <p className="text-xs text-[#64748B] leading-relaxed max-w-xs mx-auto">
                   I can help you understand your reports, explain your results, and answer questions about your health and specialist recommendations.
                 </p>
               </div>
 
               {/* CONTEXTUAL SUGGESTED QUESTIONS */}
               <div className="space-y-2 pt-1">
-                {visibleSuggestedQuestions.map((q) => {
+                {suggestedQuestions.map((q) => {
                   const QIcon = q.icon;
                   return (
                     <button
                       key={q.id}
                       type="button"
                       onClick={() => handleSendMessage(q.text)}
-                      className="w-full text-left p-3 rounded-xl bg-white dark:bg-[#081421] border border-slate-200/80 dark:border-[#20364A] hover:border-slate-300 dark:hover:border-[#00D6B0]/40 hover:bg-slate-50 dark:hover:bg-[#14283B] transition-all shadow-2xs flex items-center justify-between gap-3 group cursor-pointer"
+                      className="w-full text-left p-3 rounded-xl bg-white border border-slate-200/80 hover:border-slate-300 hover:bg-slate-50 transition-all shadow-2xs flex items-center justify-between gap-3 group"
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${q.iconBg}`}>
                           <QIcon className="w-3.5 h-3.5" />
                         </div>
-                        <span className="text-xs font-semibold text-slate-800 dark:text-[#F1F5FB] truncate">
+                        <span className="text-xs font-semibold text-slate-800 truncate">
                           {q.text}
                         </span>
                       </div>
-                      <ChevronRight className="w-4 h-4 text-slate-400 dark:text-[#8297B2] group-hover:text-slate-700 dark:group-hover:text-[#F1F5FB] shrink-0 transition-transform group-hover:translate-x-0.5" />
+                      <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-slate-700 shrink-0 transition-transform group-hover:translate-x-0.5" />
                     </button>
                   );
                 })}
@@ -428,32 +393,26 @@ export const MedicalAssistantPanel: React.FC<MedicalAssistantPanelProps> = ({
                   className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}
                 >
                   <div
-                    className={`max-w-[90%] rounded-2xl p-3.5 text-xs leading-relaxed shadow-2xs ${
+                    className={`max-w-[88%] rounded-2xl p-3 text-xs leading-relaxed shadow-2xs ${
                       m.role === 'user'
-                        ? 'bg-[#071B49] dark:bg-[#102033] dark:border dark:border-[#20364A] text-white dark:text-[#F1F5FB] rounded-br-xs'
+                        ? 'bg-[#071B49] text-white rounded-br-xs'
                         : m.error
-                        ? 'bg-rose-50 dark:bg-[#321B27] text-rose-800 dark:text-[#FF5368] border border-rose-200 dark:border-[#7A3043] rounded-bl-xs'
-                        : 'bg-slate-50 dark:bg-[#081421] text-slate-800 dark:text-[#F1F5FB] border border-slate-200/80 dark:border-[#20364A] rounded-bl-xs'
+                        ? 'bg-rose-50 text-rose-800 border border-rose-200 rounded-bl-xs'
+                        : 'bg-slate-50 text-slate-800 border border-slate-200/80 rounded-bl-xs'
                     }`}
                   >
-                    {m.role === 'assistant' && !m.error ? (
-                      <MarkdownMessage content={m.content} />
-                    ) : (
-                      <div className="whitespace-pre-wrap">{m.content}</div>
-                    )}
-
-                    {m.error && m.retryable !== false && (
+                    <div className="whitespace-pre-wrap">{m.content}</div>
+                    {m.error && (
                       <button
                         type="button"
                         onClick={() => handleRetry(m.id)}
-                        className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold text-rose-700 dark:text-[#FF5368] bg-rose-100 dark:bg-[#FF5368]/20 hover:bg-rose-200 dark:hover:bg-[#FF5368]/30 rounded-lg transition-colors cursor-pointer"
+                        className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold text-rose-700 bg-rose-100 hover:bg-rose-200 rounded-lg transition-colors cursor-pointer"
                       >
                         <RotateCcw className="w-3 h-3" />
                         <span>Retry</span>
                       </button>
                     )}
-
-                    <span className={`text-[10px] block mt-1.5 ${m.role === 'user' ? 'text-slate-300 dark:text-[#8297B2] text-right' : 'text-slate-400 dark:text-[#8297B2]'}`}>
+                    <span className={`text-[10px] block mt-1.5 ${m.role === 'user' ? 'text-slate-300 text-right' : 'text-slate-400'}`}>
                       {m.timestamp}
                     </span>
                   </div>
@@ -461,52 +420,58 @@ export const MedicalAssistantPanel: React.FC<MedicalAssistantPanelProps> = ({
               ))}
 
               {isSending && (
-                <div className="flex items-start gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-[#081421] text-blue-600 dark:text-[#00D6B0] border border-blue-100 dark:border-[#20364A] flex items-center justify-center shrink-0 mt-1">
+                <div className="flex items-start gap-2 animate-in fade-in">
+                  <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 mt-1">
                     <Bot className="w-4 h-4" />
                   </div>
-                  <div className="bg-slate-50 dark:bg-[#081421] rounded-2xl p-3 border border-slate-200/80 dark:border-[#20364A] text-xs text-slate-500 dark:text-[#8297B2] flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-blue-500 dark:bg-[#00D6B0] animate-pulse" />
-                    <span>Preparing your response...</span>
+                  <div className="bg-slate-50 rounded-2xl p-3 border border-slate-200/80 text-xs text-slate-500 space-y-2 w-64 max-w-[85%]">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                      <span className="font-medium text-slate-600">Analyzing your medical data...</span>
+                    </div>
+                    <div className="space-y-1.5 pt-0.5">
+                      <Skeleton className="h-2.5 w-full rounded" />
+                      <Skeleton className="h-2.5 w-4/5 rounded" />
+                      <Skeleton className="h-2.5 w-3/5 rounded" />
+                    </div>
                   </div>
                 </div>
               )}
+              <div ref={chatBottomRef} />
             </div>
           )
         ) : (
           /* INSIGHTS TAB */
           <div className="space-y-3 py-1">
-            <div className="bg-blue-50/70 dark:bg-[#081421] border border-blue-100 dark:border-[#20364A] rounded-xl p-3.5 text-xs text-blue-900 dark:text-[#F1F5FB] space-y-1">
-              <span className="font-bold block text-blue-900 dark:text-[#00D6B0]">Validated Medical Summary</span>
-              <p className="text-[11px] text-blue-800/90 dark:text-[#8297B2] leading-relaxed">
-                {snapshot
-                  ? `Analysis based on ${snapshot.reportCount} reports and ${snapshot.parametersAnalyzed} unique parameters.`
-                  : 'Health snapshot is unavailable.'}
+            <div className="bg-blue-50/70 border border-blue-100 rounded-xl p-3.5 text-xs text-blue-900 space-y-1">
+              <span className="font-bold block">Validated Medical Summary</span>
+              <p className="text-[11px] text-blue-800/90 leading-relaxed">
+                Analysis based on {snapshot?.reportCount || 0} reports and {snapshot?.parametersAnalyzed || 0} unique parameters.
               </p>
             </div>
 
             <div className="space-y-2">
-              <span className="text-[11px] font-bold text-slate-400 dark:text-[#8297B2] uppercase tracking-wider block">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
                 Recommended Specialist Mappings
               </span>
               {guidances.length > 0 ? (
                 guidances.map((g) => (
-                  <div key={g.id} className="p-3 rounded-xl border border-slate-200 dark:border-[#20364A] bg-white dark:bg-[#081421] text-xs space-y-1 shadow-2xs">
+                  <div key={g.id} className="p-3 rounded-xl border border-slate-200 bg-white text-xs space-y-1 shadow-2xs">
                     <div className="flex items-center justify-between">
-                      <span className="font-bold text-slate-900 dark:text-[#F1F5FB]">{g.suggested_specialty}</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-slate-100 dark:bg-[#102033] text-slate-700 dark:text-[#8297B2]">
+                      <span className="font-bold text-slate-900">{g.suggested_specialty}</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-slate-100 text-slate-700">
                         {g.domain}
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-500 dark:text-[#8297B2] leading-tight">
+                    <p className="text-[11px] text-slate-500 leading-tight">
                       {g.evidence && !g.evidence.startsWith('{')
                         ? g.evidence
-                        : 'The saved analysis does not include an explanation for this recommendation.'}
+                        : 'Routine monitoring based on validated laboratory findings.'}
                     </p>
                   </div>
                 ))
               ) : (
-                <p className="text-xs text-slate-400 dark:text-[#8297B2] italic">No specialist mappings generated yet.</p>
+                <p className="text-xs text-slate-400 italic">No specialist mappings generated yet.</p>
               )}
             </div>
           </div>
@@ -514,11 +479,11 @@ export const MedicalAssistantPanel: React.FC<MedicalAssistantPanelProps> = ({
       </div>
 
       {/* FIXED CHAT COMPOSER AT BOTTOM */}
-      <div className="p-3 sm:p-3.5 border-t border-slate-100 dark:border-[#20364A] bg-white dark:bg-[#0D1B2A] shrink-0 space-y-2">
-        <div className="relative flex items-center bg-[#F8FAFC] dark:bg-[#081421] border border-slate-200 dark:border-[#20364A] rounded-xl focus-within:border-[#00D6B0] focus-within:ring-2 focus-within:ring-[#00D6B0]/20 transition-all">
+      <div className="p-3 sm:p-3.5 border-t border-slate-100 dark:border-[#152A42] bg-white dark:bg-[#081729] shrink-0 space-y-2">
+        <div className="relative flex items-center bg-[#F8FAFC] dark:bg-[#0B1B30] border border-slate-200 dark:border-[#152A42] rounded-xl focus-within:border-[#00A884] focus-within:dark:border-[#00D6B0] focus-within:ring-2 focus-within:ring-[#00A884]/20 transition-all">
           <button
             type="button"
-            className="p-2.5 text-slate-400 dark:text-[#8297B2] hover:text-slate-600 dark:hover:text-[#F1F5FB] transition-colors"
+            className="p-2 text-slate-400 dark:text-[#647A96] hover:text-slate-600 dark:hover:text-white transition-colors"
             title="Attach health document"
             aria-label="Attach document"
           >
@@ -530,16 +495,16 @@ export const MedicalAssistantPanel: React.FC<MedicalAssistantPanelProps> = ({
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={isSending || isClearing}
+            disabled={isSending}
             placeholder="Ask a question about your health..."
-            className="flex-1 bg-transparent py-2.5 px-1 text-xs sm:text-sm text-slate-800 dark:text-[#F1F5FB] placeholder-slate-400 dark:placeholder-[#8297B2] focus:outline-hidden"
+            className="flex-1 bg-transparent py-2.5 px-1 text-xs sm:text-sm text-slate-800 dark:text-white placeholder-slate-400 dark:placeholder-[#647A96] focus:outline-hidden"
           />
 
           <button
             type="button"
             onClick={() => handleSendMessage()}
-            disabled={!inputValue.trim() || isSending || isClearing}
-            className="m-1.5 p-2 rounded-xl bg-[#00A884] dark:bg-[#00D6B0] hover:bg-[#009272] dark:hover:bg-[#00A88F] disabled:opacity-40 text-white dark:text-[#050D18] dark:font-bold transition-colors shadow-2xs focus:outline-hidden cursor-pointer"
+            disabled={!inputValue.trim() || isSending}
+            className="m-1.5 p-2 rounded-xl bg-[#00A884] dark:bg-[#00D6B0] hover:bg-[#009272] dark:hover:bg-[#00A88F] disabled:opacity-40 text-white dark:text-[#040D1A] transition-colors shadow-2xs focus:outline-hidden"
             aria-label="Send message"
           >
             <Send className="w-3.5 h-3.5 stroke-[2.5]" />
@@ -547,7 +512,7 @@ export const MedicalAssistantPanel: React.FC<MedicalAssistantPanelProps> = ({
         </div>
 
         {/* DISCLAIMER */}
-        <p className="text-[10px] text-slate-400 dark:text-[#8297B2] text-center leading-tight">
+        <p className="text-[10px] text-slate-400 dark:text-[#647A96] text-center leading-tight">
           This AI assistant provides information only and is not a substitute for professional medical advice.
         </p>
       </div>

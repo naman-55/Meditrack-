@@ -24,13 +24,19 @@ export interface AppEnvConfig {
   PASSWORD_RESET_RATE_LIMIT: number;
   FRONTEND_URL: string;
   EMAIL_PROVIDER: string;
+  SMTP_HOST?: string;
+  SMTP_PORT: number;
+  SMTP_USER?: string;
+  SMTP_PASS?: string;
+  SMTP_SECURE: boolean;
+  EMAIL_FROM: string;
   RESEND_API_KEY?: string;
   SENDGRID_API_KEY?: string;
-  EMAIL_FROM: string;
   IS_EMAIL_CONFIGURED: boolean;
   SMS_PROVIDER: string;
   TWILIO_ACCOUNT_SID?: string;
   TWILIO_AUTH_TOKEN?: string;
+  TWILIO_FROM_NUMBER?: string;
   TWILIO_PHONE_NUMBER?: string;
   IS_SMS_CONFIGURED: boolean;
   VAPID_PUBLIC_KEY: string;
@@ -75,32 +81,17 @@ function getValidatedConfig(): AppEnvConfig {
   const tokenExpiryMinutes = parseInt(process.env.PASSWORD_RESET_TOKEN_EXPIRY_MINUTES || '30', 10);
   const resetRateLimit = parseInt(process.env.PASSWORD_RESET_RATE_LIMIT || '3', 10);
   const frontendUrl = process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:3000';
-  const emailProvider = process.env.EMAIL_PROVIDER || (isProduction ? 'smtp' : 'console');
-
-  const rawGeminiKey = (process.env.GEMINI_API_KEY || '').trim();
-  const isGeminiConfigured = rawGeminiKey.length > 0 && !rawGeminiKey.includes('your-');
-
-  const rawMapsKey = (process.env.GOOGLE_MAPS_API_KEY || process.env.VITE_GOOGLE_MAPS_API_KEY || '').trim();
-  const isMapsConfigured = rawMapsKey.length > 0 && !rawMapsKey.includes('your-');
-
-  // Notification Providers Config
-  const resendApiKey = (process.env.RESEND_API_KEY || '').trim();
-  const sendgridApiKey = (process.env.SENDGRID_API_KEY || '').trim();
-  const emailFrom = process.env.EMAIL_FROM || 'MediTrack Health Alerts <alerts@meditrack.health>';
-  const isEmailConfigured = (resendApiKey.length > 10 && !resendApiKey.includes('your-')) ||
-                            (sendgridApiKey.length > 10 && !sendgridApiKey.includes('your-'));
-
-  const smsProvider = (process.env.SMS_PROVIDER || 'twilio').toLowerCase();
-  const twilioAccountSid = (process.env.TWILIO_ACCOUNT_SID || '').trim();
-  const twilioAuthToken = (process.env.TWILIO_AUTH_TOKEN || '').trim();
-  const twilioPhoneNumber = (process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_FROM || '').trim();
-  const isSmsConfigured = twilioAccountSid.startsWith('AC') && twilioAuthToken.length > 10 && twilioPhoneNumber.length > 5;
-
-  // Web Push VAPID Configuration
-  const vapidPublicKey = (process.env.VAPID_PUBLIC_KEY || 'BLIBxJOLLsQgUWbPBZ_wN57YKWusriSo9vH5uI3n4JPq2BttdjuUuhn8Lelm6EUhzc39oASBMTqNQP3qDtch6G0').trim();
-  const vapidPrivateKey = (process.env.VAPID_PRIVATE_KEY || '0bZT9N8NwIMcLipvYogo0vJIqrLR0AQqiGluRqXORNo').trim();
-  const vapidSubject = (process.env.VAPID_SUBJECT || 'mailto:support@meditrack.health').trim();
-  const isPushConfigured = vapidPublicKey.length > 20 && vapidPrivateKey.length > 20;
+  
+  // Email Configuration
+  const emailProvider = (process.env.EMAIL_PROVIDER || (isProduction ? 'smtp' : 'console')).toLowerCase();
+  const smtpHost = process.env.SMTP_HOST || undefined;
+  const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
+  const smtpUser = process.env.SMTP_USER || undefined;
+  const smtpPass = process.env.SMTP_PASS || undefined;
+  const smtpSecure = process.env.SMTP_SECURE === 'true' || smtpPort === 465;
+  const emailFrom = process.env.EMAIL_FROM || process.env.SENDER_EMAIL || 'MediTrack Alerts <alerts@meditrack.health>';
+  const resendApiKey = (process.env.RESEND_API_KEY || '').trim() || undefined;
+  const sendgridApiKey = (process.env.SENDGRID_API_KEY || '').trim() || undefined;
 
   // Google OAuth Configuration for Gmail Integration
   const googleClientId = (process.env.GOOGLE_CLIENT_ID || '').trim();
@@ -108,6 +99,42 @@ function getValidatedConfig(): AppEnvConfig {
   const googleRedirectUri = (process.env.GOOGLE_REDIRECT_URI || `${frontendUrl}/api/notifications/gmail/callback`).trim();
   const isGmailOAuthConfigured = googleClientId.length > 5 && googleClientSecret.length > 5;
   const notificationMode = (process.env.NOTIFICATION_MODE || 'gmail-and-telegram') as 'gmail-only' | 'gmail-and-telegram' | 'all';
+
+  const isEmailConfigured = !!(
+    isGmailOAuthConfigured ||
+    (emailProvider === 'resend' && resendApiKey) ||
+    (emailProvider === 'sendgrid' && sendgridApiKey) ||
+    (emailProvider === 'smtp' && smtpHost && smtpUser) ||
+    resendApiKey || 
+    sendgridApiKey || 
+    (smtpHost && smtpUser)
+  );
+
+  // SMS Configuration (Twilio / Gateway)
+  const smsProvider = (process.env.SMS_PROVIDER || 'twilio').toLowerCase();
+  const twilioSid = (process.env.TWILIO_ACCOUNT_SID || '').trim() || undefined;
+  const twilioToken = (process.env.TWILIO_AUTH_TOKEN || '').trim() || undefined;
+  const twilioFrom = (process.env.TWILIO_FROM_NUMBER || process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_FROM || '').trim() || undefined;
+
+  const isSmsConfigured = !!(
+    twilioSid && 
+    twilioToken && 
+    twilioFrom && 
+    !twilioSid.includes('your-') && 
+    !twilioToken.includes('your-')
+  );
+
+  const rawGeminiKey = (process.env.GEMINI_API_KEY || '').trim();
+  const isGeminiConfigured = rawGeminiKey.length > 0 && !rawGeminiKey.includes('your-');
+
+  const rawMapsKey = (process.env.GOOGLE_MAPS_API_KEY || process.env.VITE_GOOGLE_MAPS_API_KEY || '').trim();
+  const isMapsConfigured = rawMapsKey.length > 0 && !rawMapsKey.includes('your-');
+
+  // Web Push VAPID Configuration
+  const vapidPublicKey = (process.env.VAPID_PUBLIC_KEY || 'BLIBxJOLLsQgUWbPBZ_wN57YKWusriSo9vH5uI3n4JPq2BttdjuUuhn8Lelm6EUhzc39oASBMTqNQP3qDtch6G0').trim();
+  const vapidPrivateKey = (process.env.VAPID_PRIVATE_KEY || '0bZT9N8NwIMcLipvYogo0vJIqrLR0AQqiGluRqXORNo').trim();
+  const vapidSubject = (process.env.VAPID_SUBJECT || 'mailto:support@meditrack.health').trim();
+  const isPushConfigured = vapidPublicKey.length > 20 && vapidPrivateKey.length > 20;
 
   // Telegram Bot Configuration
   const telegramBotToken = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
@@ -132,20 +159,26 @@ function getValidatedConfig(): AppEnvConfig {
     PASSWORD_RESET_TOKEN_EXPIRY_MINUTES: isNaN(tokenExpiryMinutes) ? 30 : tokenExpiryMinutes,
     PASSWORD_RESET_RATE_LIMIT: isNaN(resetRateLimit) ? 3 : resetRateLimit,
     FRONTEND_URL: frontendUrl,
-    EMAIL_PROVIDER: 'gmail',
-    RESEND_API_KEY: resendApiKey || undefined,
-    SENDGRID_API_KEY: sendgridApiKey || undefined,
+    EMAIL_PROVIDER: emailProvider,
+    SMTP_HOST: smtpHost,
+    SMTP_PORT: isNaN(smtpPort) ? 587 : smtpPort,
+    SMTP_USER: smtpUser,
+    SMTP_PASS: smtpPass,
+    SMTP_SECURE: smtpSecure,
     EMAIL_FROM: emailFrom,
-    IS_EMAIL_CONFIGURED: isGmailOAuthConfigured,
-    SMS_PROVIDER: 'disabled',
-    TWILIO_ACCOUNT_SID: undefined,
-    TWILIO_AUTH_TOKEN: undefined,
-    TWILIO_PHONE_NUMBER: undefined,
-    IS_SMS_CONFIGURED: false, // SMS replaced with Telegram
+    RESEND_API_KEY: resendApiKey,
+    SENDGRID_API_KEY: sendgridApiKey,
+    IS_EMAIL_CONFIGURED: isEmailConfigured,
+    SMS_PROVIDER: smsProvider,
+    TWILIO_ACCOUNT_SID: twilioSid,
+    TWILIO_AUTH_TOKEN: twilioToken,
+    TWILIO_FROM_NUMBER: twilioFrom,
+    TWILIO_PHONE_NUMBER: twilioFrom,
+    IS_SMS_CONFIGURED: isSmsConfigured,
     VAPID_PUBLIC_KEY: vapidPublicKey,
     VAPID_PRIVATE_KEY: vapidPrivateKey,
     VAPID_SUBJECT: vapidSubject,
-    IS_PUSH_CONFIGURED: false,
+    IS_PUSH_CONFIGURED: isPushConfigured,
     GEMINI_API_KEY: isGeminiConfigured ? rawGeminiKey : undefined,
     IS_GEMINI_CONFIGURED: isGeminiConfigured,
     GOOGLE_MAPS_API_KEY: isMapsConfigured ? rawMapsKey : undefined,
@@ -175,16 +208,14 @@ export function getEnvironmentDiagnostics() {
     authConfigured: !!envConfig.JWT_SECRET,
     geminiConfigured: envConfig.IS_GEMINI_CONFIGURED,
     mapsConfigured: envConfig.IS_MAPS_CONFIGURED,
+    emailProvider: envConfig.EMAIL_PROVIDER,
+    emailConfigured: envConfig.IS_EMAIL_CONFIGURED,
     gmailOAuthConfigured: envConfig.IS_GMAIL_OAUTH_CONFIGURED,
     notificationMode: envConfig.NOTIFICATION_MODE,
-    emailConfigured: envConfig.IS_EMAIL_CONFIGURED,
-    emailProvider: 'gmail',
     telegramConfigured: envConfig.IS_TELEGRAM_CONFIGURED,
     telegramBot: envConfig.TELEGRAM_BOT_USERNAME ? `@${envConfig.TELEGRAM_BOT_USERNAME}` : (envConfig.IS_TELEGRAM_CONFIGURED ? 'Configured' : 'Missing Token'),
-    smsConfigured: false,
-    smsProvider: 'disabled (replaced with Telegram Bot)',
-    pushConfigured: false
+    smsProvider: envConfig.SMS_PROVIDER,
+    smsConfigured: envConfig.IS_SMS_CONFIGURED,
+    pushConfigured: envConfig.IS_PUSH_CONFIGURED
   };
 }
-
-

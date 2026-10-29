@@ -17,28 +17,15 @@ import {
   Clock,
   Sparkles,
   Sun,
-  Moon,
-  AlertTriangle
+  Moon
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '../utils/cn';
 import { useAuth } from '../context/AuthContext';
+import { useAlertNotifications } from '../context/AlertNotificationContext';
 import { useSettings } from '../context/SettingsContext';
-import { apiClient, getAccessToken } from '../api/client';
-import { notificationService } from '../api/notifications';
-
-interface AlertItem {
-  id: number;
-  type: string;
-  title?: string;
-  severity?: string;
-  message: string;
-  source: string;
-  status: string;
-  is_read?: number;
-  created_at: string;
-  contact_name?: string;
-}
+import { apiClient } from '../api/client';
+import { AlertListSkeleton } from './common/Skeleton';
 
 interface SearchResults {
   reports: Array<{ id: number; filename: string; report_type: string; report_date: string }>;
@@ -55,13 +42,18 @@ export default function Header({ onMenuClick }: HeaderProps) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { preferences, setAppearance } = useSettings();
-
-  const isDarkMode = preferences.appearance.theme === 'Dark' ||
-    (preferences.appearance.theme === 'System' && typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-
+  const isDarkMode = preferences.appearance.theme === 'Dark' || (preferences.appearance.theme === 'System' && typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   const toggleTheme = () => {
     setAppearance('theme', isDarkMode ? 'Light' : 'Dark');
   };
+  const { 
+    alerts, 
+    unreadCount: unreadAlertsCount, 
+    isLoading: isLoadingAlerts, 
+    markAsRead: markAlertAsRead, 
+    markAllAsRead: markAllAlertsAsRead, 
+    refreshAlerts 
+  } = useAlertNotifications();
 
   // Search State
   const [searchQuery, setSearchQuery] = useState('');
@@ -72,56 +64,11 @@ export default function Header({ onMenuClick }: HeaderProps) {
 
   // Notifications State
   const [showNotifications, setShowNotifications] = useState(false);
-  const [alerts, setAlerts] = useState<AlertItem[]>([]);
-  const [isLoadingAlerts, setIsLoadingAlerts] = useState(false);
-  const [toastAlert, setToastAlert] = useState<AlertItem | null>(null);
   const notifContainerRef = useRef<HTMLDivElement>(null);
-  const seenAlertIdsRef = useRef<Set<number>>(new Set());
 
   // Profile Menu State
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
-
-  // Fetch Alerts
-  const fetchAlerts = async () => {
-    try {
-      const token = getAccessToken();
-      if (!token) return;
-      const data = await apiClient.get('/api/alerts');
-      const list: AlertItem[] = Array.isArray(data) ? data : [];
-      setAlerts(list);
-
-      // Check for newly arrived unread alerts to trigger in-app toast banner
-      const unreadAlerts = list.filter(a => !a.is_read);
-      for (const alert of unreadAlerts) {
-        if (!seenAlertIdsRef.current.has(alert.id)) {
-          seenAlertIdsRef.current.add(alert.id);
-          setToastAlert(alert);
-          break; // Show one active toast banner at a time
-        }
-      }
-    } catch {
-      // Gracefully ignore transient alert fetch failures in background polling
-    } finally {
-      setIsLoadingAlerts(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchAlerts();
-    // Poll every 12 seconds for responsive in-app alert updates
-    const interval = setInterval(fetchAlerts, 12000);
-
-    const handleAlertCreated = () => {
-      fetchAlerts();
-    };
-    window.addEventListener('meditrack:alert-created', handleAlertCreated);
-
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('meditrack:alert-created', handleAlertCreated);
-    };
-  }, [user?.id]);
 
   // Debounced Global Search
   useEffect(() => {
@@ -167,43 +114,24 @@ export default function Header({ onMenuClick }: HeaderProps) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const markAlertAsRead = async (id: number) => {
-    try {
-      await apiClient.put(`/api/alerts/${id}/read`, {});
-      setAlerts(prev => prev.map(a => a.id === id ? { ...a, is_read: 1 } : a));
-    } catch (err) {
-      console.error('Mark alert read error:', err);
-    }
-  };
-
-  const markAllAlertsAsRead = async () => {
-    try {
-      await apiClient.put('/api/alerts/read-all', {});
-      setAlerts(prev => prev.map(a => ({ ...a, is_read: 1 })));
-    } catch (err) {
-      console.error('Mark all read error:', err);
-    }
-  };
-
-  const unreadAlertsCount = alerts.filter(a => !a.is_read).length;
   const totalResultsCount = searchResults 
     ? (searchResults.reports.length + searchResults.measurements.length + searchResults.medications.length + searchResults.specialists.length)
     : 0;
 
   return (
-    <header className="h-16 bg-white dark:bg-[#071321] border-b border-[#DCE5EC] dark:border-[#20364A] px-4 md:px-8 flex items-center justify-between sticky top-0 z-30 shadow-2xs">
+    <header className="h-16 bg-white dark:bg-[#040D1A] border-b border-[#DCE5EC] dark:border-[#0D1C2E] px-4 md:px-8 flex items-center justify-between sticky top-0 z-30 shadow-2xs transition-colors duration-150">
       {/* Left: Mobile Menu & Welcome Heading */}
       <div className="flex items-center gap-4">
         <button 
           type="button"
           onClick={onMenuClick}
-          className="p-2 -ml-2 text-[#64748B] hover:text-[#071B49] dark:text-[#A6B8CF] dark:hover:text-[#F1F5FB] rounded-xl hover:bg-slate-50 dark:hover:bg-[#14283B] md:hidden transition-colors"
+          className="p-2 -ml-2 text-[#64748B] hover:text-[#071B49] dark:text-[#94A9C2] dark:hover:text-[#FFFFFF] rounded-xl hover:bg-slate-50 dark:hover:bg-[#0D2038] md:hidden transition-colors"
           title="Open Navigation"
         >
           <Menu className="w-5 h-5" />
         </button>
         <div className="hidden md:block">
-          <h2 className="text-base sm:text-lg font-bold text-[#071B49] dark:text-[#F1F5FB] leading-tight">
+          <h2 className="text-base sm:text-lg font-bold text-[#071B49] dark:text-[#FFFFFF] leading-tight">
             Welcome back, <span className="text-[#00A884] dark:text-[#00D6B0]">{user?.name ? user.name.split(' ')[0] : 'Patient'}</span> 👋
           </h2>
           <p className="text-xs text-[#64748B] dark:text-[#8297B2] mt-0.5">Authoritative healthcare monitoring &amp; clinical timeline</p>
@@ -224,14 +152,14 @@ export default function Header({ onMenuClick }: HeaderProps) {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onFocus={() => { if (searchResults) setShowSearchDropdown(true); }}
-              className="w-full pl-9 pr-8 py-2 bg-[#F8FAFC] dark:bg-[#081421] border border-[#DCE5EC] dark:border-[#263D53] rounded-xl text-xs sm:text-sm text-[#071B49] dark:text-[#F1F5FB] focus:outline-none focus:ring-2 focus:ring-[#00A884] dark:focus:ring-[#00D6B0] focus:border-[#00A884] dark:focus:border-[#00D6B0] placeholder-[#64748B] dark:placeholder-[#8297B2] transition-all"
+              className="w-full pl-9 pr-8 py-2 bg-[#F8FAFC] dark:bg-[#0B1B30] border border-[#DCE5EC] dark:border-[#152A42] rounded-xl text-xs sm:text-sm text-[#071B49] dark:text-[#FFFFFF] focus:outline-none focus:ring-2 focus:ring-[#00D6B0] focus:border-[#00D6B0] placeholder-[#64748B] dark:placeholder-[#8297B2] transition-all"
               placeholder="Search reports, vitals, meds..."
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => { setSearchQuery(''); setSearchResults(null); }}
-                className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-[#64748B] hover:text-[#071B49] dark:text-[#8297B2] dark:hover:text-[#F1F5FB]"
+                className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-[#64748B] hover:text-[#071B49] dark:text-[#8297B2] dark:hover:text-[#FFFFFF]"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -240,8 +168,8 @@ export default function Header({ onMenuClick }: HeaderProps) {
 
           {/* Search Results Dropdown */}
           {showSearchDropdown && searchResults && (
-            <div className="absolute left-0 right-0 mt-2 bg-white dark:bg-[#081421] rounded-2xl shadow-xl border border-[#DCE5EC] dark:border-[#20364A] overflow-hidden z-50 max-h-[440px] overflow-y-auto animate-in fade-in duration-100">
-              <div className="p-3 border-b border-[#DCE5EC] dark:border-[#20364A] bg-[#F8FAFC] dark:bg-[#102033] flex items-center justify-between">
+            <div className="absolute left-0 right-0 mt-2 bg-white dark:bg-[#081729] rounded-2xl shadow-xl border border-[#DCE5EC] dark:border-[#152A42] overflow-hidden z-50 max-h-[440px] overflow-y-auto animate-in fade-in duration-100">
+              <div className="p-3 border-b border-[#DCE5EC] dark:border-[#152A42] bg-[#F8FAFC] dark:bg-[#050E1A] flex items-center justify-between">
                 <span className="text-[11px] font-bold text-[#64748B] dark:text-[#8297B2] uppercase tracking-wider">
                   {totalResultsCount} Results for &ldquo;{searchQuery}&rdquo;
                 </span>
@@ -251,8 +179,8 @@ export default function Header({ onMenuClick }: HeaderProps) {
               </div>
 
               {totalResultsCount === 0 ? (
-                <div className="p-6 text-center text-[#64748B] dark:text-[#8297B2] text-xs space-y-1">
-                  <p className="font-semibold text-[#071B49] dark:text-[#F1F5FB]">No matching records found</p>
+                <div className="p-6 text-center text-[#64748B] dark:text-slate-400 text-xs space-y-1">
+                  <p className="font-semibold text-[#071B49] dark:text-white">No matching records found</p>
                   <p>Try searching for a biomarker, report name, medication, or medical clinic.</p>
                 </div>
               ) : (
@@ -260,7 +188,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
                   {/* Reports */}
                   {searchResults.reports.length > 0 && (
                     <div>
-                      <div className="px-2.5 py-1 text-[10px] font-bold text-[#64748B] dark:text-[#8297B2] uppercase tracking-wider flex items-center gap-1.5">
+                      <div className="px-2.5 py-1 text-[10px] font-bold text-[#64748B] dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                         <FileText className="w-3 h-3 text-[#2563EB]" />
                         <span>Medical Reports ({searchResults.reports.length})</span>
                       </div>
@@ -269,13 +197,13 @@ export default function Header({ onMenuClick }: HeaderProps) {
                           <div
                             key={r.id}
                             onClick={() => { setShowSearchDropdown(false); navigate('/reports'); }}
-                            className="p-2 rounded-xl hover:bg-[#F8FAFC] dark:hover:bg-[#14283B] cursor-pointer transition-colors flex items-center justify-between"
+                            className="p-2 rounded-xl hover:bg-[#F8FAFC] dark:hover:bg-slate-800/80 cursor-pointer transition-colors flex items-center justify-between"
                           >
                             <div className="min-w-0 pr-2">
-                              <p className="text-xs font-bold text-[#071B49] dark:text-[#F1F5FB] truncate">{r.filename}</p>
-                              <p className="text-[10px] text-[#64748B] dark:text-[#8297B2]">{r.report_type} &middot; {r.report_date}</p>
+                              <p className="text-xs font-bold text-[#071B49] dark:text-slate-100 truncate">{r.filename}</p>
+                              <p className="text-[10px] text-[#64748B] dark:text-slate-400">{r.report_type} &middot; {r.report_date}</p>
                             </div>
-                            <span className="text-[10px] text-[#2563EB] font-semibold shrink-0">View &rarr;</span>
+                            <span className="text-[10px] text-[#2563EB] dark:text-blue-400 font-semibold shrink-0">View &rarr;</span>
                           </div>
                         ))}
                       </div>
@@ -284,7 +212,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
 
                   {/* Measurements */}
                   {searchResults.measurements.length > 0 && (
-                    <div className="border-t border-[#DCE5EC]/60 dark:border-[#1B3044] pt-2">
+                    <div className="border-t border-[#DCE5EC]/60 dark:border-[#20364A] pt-2">
                       <div className="px-2.5 py-1 text-[10px] font-bold text-[#64748B] dark:text-[#8297B2] uppercase tracking-wider flex items-center gap-1.5">
                         <Activity className="w-3 h-3 text-[#00A884] dark:text-[#00D6B0]" />
                         <span>Clinical Vitals &amp; Biomarkers ({searchResults.measurements.length})</span>
@@ -294,7 +222,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
                           <div
                             key={m.id}
                             onClick={() => { setShowSearchDropdown(false); navigate('/timeline'); }}
-                            className="p-2 rounded-xl hover:bg-[#F8FAFC] dark:hover:bg-[#14283B] cursor-pointer transition-colors flex items-center justify-between"
+                            className="p-2 rounded-xl hover:bg-[#F8FAFC] dark:hover:bg-[#162A3E] cursor-pointer transition-colors flex items-center justify-between"
                           >
                             <div className="min-w-0 pr-2">
                               <p className="text-xs font-bold text-[#071B49] dark:text-[#F1F5FB] truncate">{m.parameter}</p>
@@ -311,7 +239,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
 
                   {/* Medications */}
                   {searchResults.medications.length > 0 && (
-                    <div className="border-t border-[#DCE5EC]/60 dark:border-[#1B3044] pt-2">
+                    <div className="border-t border-[#DCE5EC]/60 dark:border-[#20364A] pt-2">
                       <div className="px-2.5 py-1 text-[10px] font-bold text-[#64748B] dark:text-[#8297B2] uppercase tracking-wider flex items-center gap-1.5">
                         <Pill className="w-3 h-3 text-[#EF476F]" />
                         <span>Prescriptions &amp; Medications ({searchResults.medications.length})</span>
@@ -321,7 +249,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
                           <div
                             key={med.id}
                             onClick={() => { setShowSearchDropdown(false); navigate('/dashboard'); }}
-                            className="p-2 rounded-xl hover:bg-[#F8FAFC] dark:hover:bg-[#14283B] cursor-pointer transition-colors flex items-center justify-between"
+                            className="p-2 rounded-xl hover:bg-[#F8FAFC] dark:hover:bg-[#162A3E] cursor-pointer transition-colors flex items-center justify-between"
                           >
                             <div className="min-w-0 pr-2">
                               <p className="text-xs font-bold text-[#071B49] dark:text-[#F1F5FB] truncate">{med.name}</p>
@@ -336,8 +264,8 @@ export default function Header({ onMenuClick }: HeaderProps) {
 
                   {/* Specialists */}
                   {searchResults.specialists.length > 0 && (
-                    <div className="border-t border-[#DCE5EC]/60 dark:border-[#1B3044] pt-2">
-                      <div className="px-2.5 py-1 text-[10px] font-bold text-[#64748B] dark:text-[#8297B2] uppercase tracking-wider flex items-center gap-1.5">
+                    <div className="border-t border-[#DCE5EC]/60 dark:border-[#20364A] pt-2">
+                      <div className="px-2.5 py-1 text-[10px] font-bold text-[#64748B] dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                         <MapPin className="w-3 h-3 text-[#2563EB]" />
                         <span>Healthcare Providers ({searchResults.specialists.length})</span>
                       </div>
@@ -346,13 +274,13 @@ export default function Header({ onMenuClick }: HeaderProps) {
                           <div
                             key={s.id}
                             onClick={() => { setShowSearchDropdown(false); navigate('/care-near-me'); }}
-                            className="p-2 rounded-xl hover:bg-[#F8FAFC] dark:hover:bg-[#14283B] cursor-pointer transition-colors flex items-center justify-between"
+                            className="p-2 rounded-xl hover:bg-[#F8FAFC] dark:hover:bg-slate-800/80 cursor-pointer transition-colors flex items-center justify-between"
                           >
                             <div className="min-w-0 pr-2">
-                              <p className="text-xs font-bold text-[#071B49] dark:text-[#F1F5FB] truncate">{s.name}</p>
-                              <p className="text-[10px] text-[#64748B] dark:text-[#8297B2]">{s.specialty || 'Medical Facility'}</p>
+                              <p className="text-xs font-bold text-[#071B49] dark:text-slate-100 truncate">{s.name}</p>
+                              <p className="text-[10px] text-[#64748B] dark:text-slate-400">{s.specialty || 'Medical Facility'}</p>
                             </div>
-                            <span className="text-[10px] text-[#2563EB] font-semibold shrink-0">Map &rarr;</span>
+                            <span className="text-[10px] text-[#2563EB] dark:text-blue-400 font-semibold shrink-0">Map &rarr;</span>
                           </div>
                         ))}
                       </div>
@@ -370,19 +298,22 @@ export default function Header({ onMenuClick }: HeaderProps) {
             type="button"
             onClick={() => {
               setShowNotifications(!showNotifications);
-              if (!showNotifications) fetchAlerts();
+              if (!showNotifications) refreshAlerts();
             }}
             className={cn(
-              "w-10 h-10 rounded-xl flex items-center justify-center transition-colors relative border",
+              "w-10 h-10 rounded-xl flex items-center justify-center transition-colors relative",
               showNotifications 
-                ? "bg-[#E8FAF4] text-[#00A884] border-[#00A884]/30 dark:bg-[#102033] dark:text-[#00D6B0] dark:border-[#00D6B0]/40" 
-                : "text-[#64748B] hover:text-[#071B49] hover:bg-slate-50 border-[#DCE5EC] bg-white dark:bg-[#081421] dark:text-[#A6B8CF] dark:hover:text-[#F1F5FB] dark:hover:bg-[#14283B] dark:border-[#20364A]"
+                ? "bg-[#E8FAF4] dark:bg-[#062E2D] text-[#00A884] dark:text-[#00D6B0] border border-emerald-300 dark:border-[#075E56]" 
+                : "text-[#64748B] hover:text-[#071B49] dark:text-[#B4C4D8] dark:hover:text-[#F1F5FB] hover:bg-slate-50 dark:hover:bg-[#162A3E] border border-[#DCE5EC] dark:border-[#20364A]"
             )}
             title="Health Alerts & Notifications"
           >
             <Bell className="w-4 h-4" />
             {unreadAlertsCount > 0 && (
-              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-[#EF476F] dark:bg-[#FF5368] text-white text-[10px] font-bold rounded-full flex items-center justify-center ring-2 ring-white dark:ring-[#071321]">
+              <span className={cn(
+                "absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 text-white text-[10px] font-bold rounded-full flex items-center justify-center ring-2 ring-white dark:ring-[#0B1624]",
+                alerts.some(a => !a.is_read && a.severity === 'CRITICAL') ? "bg-red-600 animate-pulse" : "bg-[#EF476F]"
+              )}>
                 {unreadAlertsCount > 9 ? '9+' : unreadAlertsCount}
               </span>
             )}
@@ -390,11 +321,11 @@ export default function Header({ onMenuClick }: HeaderProps) {
 
           {/* Notifications Dropdown */}
           {showNotifications && (
-            <div className="absolute right-0 mt-2 w-84 sm:w-96 bg-white dark:bg-[#0D1B2A] rounded-2xl shadow-xl border border-[#DCE5EC] dark:border-[#20364A] overflow-hidden z-50 animate-in fade-in duration-100">
-              <div className="p-4 border-b border-[#DCE5EC] dark:border-[#20364A] bg-[#F8FAFC] dark:bg-[#102033] flex items-center justify-between">
+            <div className="absolute right-0 mt-2 w-84 sm:w-96 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-[#102033] rounded-2xl shadow-xl border border-[#DCE5EC] dark:border-[#20364A] overflow-hidden z-50 animate-in fade-in duration-100">
+              <div className="p-4 border-b border-[#DCE5EC] dark:border-[#20364A] bg-[#F8FAFC] dark:bg-[#0B1624] flex items-center justify-between">
                 <div>
                   <h3 className="font-bold text-[#071B49] dark:text-[#F1F5FB] text-sm">Clinical Alerts</h3>
-                  <p className="text-[11px] text-[#64748B] dark:text-[#7186A3]">
+                  <p className="text-[11px] text-[#64748B] dark:text-[#8297B2]">
                     {unreadAlertsCount > 0 ? `${unreadAlertsCount} unread alert${unreadAlertsCount > 1 ? 's' : ''}` : 'All alerts caught up'}
                   </p>
                 </div>
@@ -402,7 +333,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
                   <button
                     type="button"
                     onClick={markAllAlertsAsRead}
-                    className="text-[11px] font-semibold text-[#00A884] dark:text-[#00D6B0] hover:underline flex items-center gap-1"
+                    className="text-[11px] font-semibold text-[#00A884] dark:text-emerald-400 hover:underline flex items-center gap-1"
                   >
                     <CheckCheck className="w-3.5 h-3.5" />
                     <span>Mark all read</span>
@@ -412,98 +343,89 @@ export default function Header({ onMenuClick }: HeaderProps) {
 
               <div className="max-h-[380px] overflow-y-auto divide-y divide-[#DCE5EC]/60 dark:divide-[#20364A]">
                 {isLoadingAlerts ? (
-                  <div className="py-8 text-center text-xs text-[#64748B] dark:text-[#7186A3]">
-                    <div className="w-4 h-4 border-2 border-[#00A884] dark:border-[#00D6B0] border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
-                    <span>Checking health alerts...</span>
-                  </div>
+                  <AlertListSkeleton count={3} />
                 ) : alerts.length === 0 ? (
-                  <div className="py-8 px-4 text-center text-xs text-[#64748B] dark:text-[#7186A3] space-y-3">
-                    <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-[#102033] flex items-center justify-center mx-auto text-slate-400 dark:text-[#7186A3]">
-                      <Bell className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-[#071B49] dark:text-[#F1F5FB]">No active clinical alerts</p>
-                      <p className="text-[11px] mt-0.5">Alerts appear automatically when risk markers or abnormal reports are detected.</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        try {
-                          await notificationService.triggerInAppTestAlert({
-                            title: 'Elevated Biomarker Alert',
-                            message: 'Fasting blood glucose 138 mg/dL and HbA1c 6.8% detected in recent metabolic panel.',
-                            severity: 'HIGH'
-                          });
-                          window.dispatchEvent(new CustomEvent('meditrack:alert-created'));
-                        } catch (err) {
-                          console.error('Trigger sample alert failed:', err);
-                        }
-                      }}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-[#00A884] hover:bg-[#008f72] text-white transition-colors shadow-xs"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Send Sample In-App Alert</span>
-                    </button>
+                  <div className="py-8 px-4 text-center text-xs text-[#64748B] dark:text-[#7186A3] space-y-1">
+                    <p className="font-bold text-[#071B49] dark:text-[#F1F5FB]">No active clinical alerts</p>
+                    <p>Alerts are generated when notable risk markers or updates are detected.</p>
                   </div>
                 ) : (
                   alerts.map((alert) => {
-                    const isCritical = alert.severity === 'CRITICAL' || alert.type?.toLowerCase().includes('critical') || alert.type?.toLowerCase().includes('emergency');
-                    const isHigh = alert.severity === 'HIGH' || alert.type?.toLowerCase().includes('high');
-                    const alertSeverity = alert.severity || (isCritical ? 'CRITICAL' : isHigh ? 'HIGH' : 'MODERATE');
+                    const sev = alert.severity || 'WARNING';
+                    const isCrit = sev === 'CRITICAL';
+                    const isHigh = sev === 'HIGH_PRIORITY';
+                    const isWarn = sev === 'WARNING';
+
+                    let badgeClass = 'bg-blue-100 text-blue-700 border-blue-200';
+                    let iconBg = 'bg-[#E8FAF4] text-[#00A884]';
+                    if (isCrit) {
+                      badgeClass = 'bg-red-100 text-red-700 border-red-300 font-black animate-pulse';
+                      iconBg = 'bg-red-100 text-red-600';
+                    } else if (isHigh) {
+                      badgeClass = 'bg-amber-100 text-amber-800 border-amber-300';
+                      iconBg = 'bg-amber-100 text-amber-700';
+                    } else if (isWarn) {
+                      badgeClass = 'bg-yellow-100 text-yellow-800 border-yellow-200';
+                      iconBg = 'bg-yellow-100 text-yellow-700';
+                    }
 
                     return (
                       <div 
                         key={alert.id}
                         onClick={() => {
                           markAlertAsRead(alert.id);
+                          if (alert.action_url) navigate(alert.action_url);
+                          else if (alert.source_report_id) navigate(`/reports?highlight=${alert.source_report_id}`);
                           setShowNotifications(false);
-                          navigate(`/family-alerts?alertId=${alert.id}`);
                         }}
                         className={cn(
                           "p-3.5 text-xs transition-colors cursor-pointer flex items-start gap-3",
-                          alert.is_read 
-                            ? "bg-white hover:bg-[#F8FAFC] dark:bg-[#0D1B2A] dark:hover:bg-[#14283B]" 
-                            : "bg-[#F0FDF9] hover:bg-[#E8FAF4] dark:bg-[#102033] dark:hover:bg-[#14283B]"
+                          alert.is_read ? "bg-white hover:bg-[#F8FAFC]" : isCrit ? "bg-red-50/70 hover:bg-red-50" : "bg-[#F0FDF9] hover:bg-[#E8FAF4]"
                         )}
                       >
-                        <div className={cn(
-                          "p-2 rounded-xl shrink-0 mt-0.5",
-                          isCritical
-                            ? "bg-[#FFF0F3] text-[#EF476F] dark:bg-[#FF5368]/15 dark:text-[#FF5368]"
-                            : isHigh
-                            ? "bg-orange-50 text-orange-600 dark:bg-orange-950/40 dark:text-orange-400"
-                            : "bg-[#E8FAF4] text-[#00A884] dark:bg-[#00D6B0]/15 dark:text-[#00D6B0]"
-                        )}>
+                        <div className={cn("p-2 rounded-xl shrink-0 mt-0.5", iconBg)}>
                           <ShieldAlert className="w-4 h-4" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between gap-1 mb-0.5">
-                            <span className="font-bold text-[#071B49] dark:text-[#F1F5FB] text-xs truncate">
-                              {alert.title || (alert.type === 'REPORT_PROCESSED' ? 'Medical Report Processed' : alert.type?.replace(/_/g, ' ')) || 'Health Notification'}
+                          <div className="flex items-center justify-between gap-1 mb-1">
+                            <span className={cn("px-1.5 py-0.5 rounded text-[9px] font-bold border", badgeClass)}>
+                              {sev}
                             </span>
-                            <span className={cn(
-                              "text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0",
-                              isCritical 
-                                ? "bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-400"
-                                : isHigh 
-                                ? "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400"
-                                : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400"
-                            )}>
-                              {alertSeverity}
+                            <span className="text-[10px] text-[#64748B] shrink-0">
+                              {alert.created_at ? new Date(alert.created_at).toLocaleDateString() : 'Recent'}
                             </span>
                           </div>
-                          <p className="text-[#64748B] dark:text-[#A6B8CF] leading-relaxed line-clamp-2">
-                            {alert.message}
+                          <p className="font-bold text-[#071B49] text-xs leading-snug">
+                            {alert.title || alert.message}
                           </p>
-                          <div className="flex items-center gap-2 mt-1.5 text-[10px] text-[#64748B] dark:text-[#7186A3]">
-                            <span>{alert.created_at ? new Date(alert.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Recent'}</span>
-                            <span>&middot;</span>
-                            <span>{alert.source || 'Clinical System'}</span>
+                          {alert.measured_value && (
+                            <div className="flex items-center gap-1.5 mt-1 text-[11px] text-slate-600">
+                              <span className="font-semibold text-slate-700">Observed:</span>
+                              <span className={cn("px-1.5 py-0.2 rounded font-bold", isCrit ? "bg-red-200 text-red-900" : isHigh ? "bg-amber-200 text-amber-900" : "bg-slate-100 text-slate-800")}>
+                                {alert.measured_value}
+                              </span>
+                              {alert.reference_range && <span className="text-slate-400">({alert.reference_range})</span>}
+                            </div>
+                          )}
+                          {alert.message && alert.title && alert.title !== alert.message && (
+                            <p className="text-[#64748B] mt-0.5 leading-relaxed line-clamp-2">
+                              {alert.message}
+                            </p>
+                          )}
+                          <div className="flex items-center gap-2 mt-1.5 text-[10px] text-[#64748B]">
+                            <span>Source: {alert.source || 'Clinical System'}</span>
+                            {alert.deliveries && alert.deliveries.length > 0 && (
+                              <>
+                                <span>&middot;</span>
+                                <span className="font-semibold text-indigo-600">
+                                  {alert.deliveries.length} dispatch{alert.deliveries.length > 1 ? 'es' : ''}
+                                </span>
+                              </>
+                            )}
                           </div>
                         </div>
                         {!alert.is_read && (
-                          <span className="w-2 h-2 rounded-full bg-[#00A884] dark:bg-[#00D6B0] shrink-0 mt-2"></span>
+                          <span className={cn("w-2 h-2 rounded-full shrink-0 mt-2", isCrit ? "bg-red-600 animate-ping" : "bg-[#00A884]")}></span>
                         )}
                       </div>
                     );
@@ -511,91 +433,18 @@ export default function Header({ onMenuClick }: HeaderProps) {
                 )}
               </div>
 
-              <div className="p-3 border-t border-[#DCE5EC] dark:border-[#20364A] bg-[#F8FAFC] dark:bg-[#102033] flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      await notificationService.triggerInAppTestAlert();
-                      window.dispatchEvent(new CustomEvent('meditrack:alert-created'));
-                    } catch (err) {
-                      console.error('Test alert trigger error:', err);
-                    }
-                  }}
-                  className="text-[11px] font-semibold text-[#00A884] dark:text-[#00D6B0] hover:underline flex items-center gap-1"
-                >
-                  <Sparkles className="w-3 h-3" />
-                  <span>Test In-App Alert</span>
-                </button>
+              <div className="p-3 border-t border-[#DCE5EC] dark:border-[#20364A] bg-[#F8FAFC] dark:bg-[#0B1B30] text-center">
                 <button
                   type="button"
                   onClick={() => { setShowNotifications(false); navigate('/family-alerts'); }}
-                  className="text-xs font-semibold text-[#2563EB] dark:text-[#4BA3FF] hover:underline"
+                  className="text-xs font-semibold text-[#2563EB] dark:text-[#2684FF] hover:underline"
                 >
-                  Manage Rules &rarr;
+                  Manage Emergency Contacts &amp; Alert Rules &rarr;
                 </button>
               </div>
             </div>
           )}
         </div>
-
-        {/* Real-time Floating In-App Toast Notification Banner */}
-        {toastAlert && (
-          <div className="fixed top-20 right-4 sm:right-8 z-50 max-w-sm sm:max-w-md bg-white dark:bg-[#0D1B2A] border-2 border-[#EF476F] dark:border-[#FF5368] rounded-2xl shadow-2xl p-4 flex items-start gap-3.5 animate-in slide-in-from-top-4 duration-300 ring-4 ring-[#EF476F]/10">
-            <div className={cn(
-              "p-2.5 rounded-xl shrink-0 mt-0.5",
-              toastAlert.severity === 'CRITICAL'
-                ? "bg-rose-100 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400"
-                : "bg-amber-100 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400"
-            )}>
-              <ShieldAlert className="w-5 h-5 animate-pulse" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between gap-1">
-                <span className="font-bold text-[10px] tracking-wider uppercase text-rose-700 dark:text-rose-400">
-                  {toastAlert.severity || 'Clinical Alert'}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setToastAlert(null)}
-                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
-                  title="Dismiss notification"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-              <h4 className="font-bold text-xs text-[#071B49] dark:text-[#F1F5FB] mt-0.5 truncate">
-                {toastAlert.title || (toastAlert.type === 'REPORT_PROCESSED' ? 'Medical Report Processed' : toastAlert.type) || 'Health Notification'}
-              </h4>
-              <p className="text-[11px] text-[#64748B] dark:text-[#A6B8CF] mt-1 line-clamp-2 leading-relaxed">
-                {toastAlert.message}
-              </p>
-              <div className="mt-2.5 flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    markAlertAsRead(toastAlert.id);
-                    setToastAlert(null);
-                    navigate(`/family-alerts?alertId=${toastAlert.id}`);
-                  }}
-                  className="px-2.5 py-1 bg-[#00A884] hover:bg-[#008f72] text-white text-[11px] font-bold rounded-lg transition-colors shadow-xs"
-                >
-                  View Details
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    markAlertAsRead(toastAlert.id);
-                    setToastAlert(null);
-                  }}
-                  className="text-[11px] font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-                >
-                  Mark as Read
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Theme Toggle Button */}
         <button
@@ -612,7 +461,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
         <button
           type="button"
           onClick={() => navigate('/settings')}
-          className="w-10 h-10 rounded-xl flex items-center justify-center text-[#64748B] hover:text-[#071B49] hover:bg-slate-50 border border-[#DCE5EC] bg-white dark:bg-[#081421] dark:text-[#A6B8CF] dark:hover:text-[#F1F5FB] dark:hover:bg-[#14283B] dark:border-[#20364A] transition-colors cursor-pointer"
+          className="w-10 h-10 rounded-xl flex items-center justify-center text-[#64748B] hover:text-[#071B49] dark:text-[#B4C4D8] dark:hover:text-[#F1F5FB] hover:bg-slate-50 dark:hover:bg-[#162A3E] border border-[#DCE5EC] dark:border-[#20364A] transition-colors"
           title="Settings & Preferences"
           aria-label="Settings page"
         >
@@ -625,31 +474,31 @@ export default function Header({ onMenuClick }: HeaderProps) {
             onClick={() => setShowProfileMenu(!showProfileMenu)}
             className="flex items-center gap-2.5 pl-2 sm:pl-3 border-l border-[#DCE5EC] dark:border-[#20364A] cursor-pointer select-none"
           >
-            <div className="w-9 h-9 rounded-xl bg-[#00A884] dark:bg-[#00D6B0] text-white dark:text-[#07111D] flex items-center justify-center font-bold text-sm shadow-2xs">
+            <div className="w-9 h-9 rounded-xl bg-[#00A884] dark:bg-[#00D6B0] text-white dark:text-[#050D18] flex items-center justify-center font-bold text-sm shadow-2xs">
               {user?.name?.[0]?.toUpperCase() || 'P'}
             </div>
             <div className="hidden lg:block text-left">
               <span className="text-xs font-bold text-[#071B49] dark:text-[#F1F5FB] block truncate max-w-[120px]">
                 {user?.name || 'Patient'}
               </span>
-              <span className="text-[10px] text-[#64748B] dark:text-[#7186A3] font-medium block">
+              <span className="text-[10px] text-[#64748B] dark:text-[#8297B2] font-medium block">
                 {user?.role === 'ADMIN' ? 'Administrator' : 'Verified Patient'}
               </span>
             </div>
-            <ChevronDown className="w-3.5 h-3.5 text-[#64748B] dark:text-[#7186A3] hidden sm:block" />
+            <ChevronDown className="w-3.5 h-3.5 text-[#64748B] dark:text-[#8297B2] hidden sm:block" />
           </div>
 
           {showProfileMenu && (
-            <div className="absolute right-0 mt-2 w-52 bg-white dark:bg-[#0D1B2A] rounded-2xl shadow-xl border border-[#DCE5EC] dark:border-[#20364A] py-1.5 z-50 overflow-hidden animate-in fade-in duration-100">
+            <div className="absolute right-0 mt-2 w-52 bg-white dark:bg-[#081729] rounded-2xl shadow-xl border border-[#DCE5EC] dark:border-[#20364A] py-1.5 z-50 overflow-hidden animate-in fade-in duration-100">
               <div className="px-4 py-2.5 border-b border-[#DCE5EC]/60 dark:border-[#20364A]">
-                <p className="text-xs font-bold text-[#071B49] dark:text-[#F1F5FB] truncate">{user?.name || 'Leo Martinez'}</p>
-                <p className="text-[11px] text-[#64748B] dark:text-[#7186A3] truncate">{user?.email || 'patient@meditrack.io'}</p>
+                <p className="text-xs font-bold text-[#071B49] dark:text-[#F1F5FB] truncate">{user?.name || 'Patient'}</p>
+                <p className="text-[11px] text-[#64748B] dark:text-[#8297B2] truncate">{user?.email || 'patient@meditrack.io'}</p>
               </div>
 
               <button
                 type="button"
                 onClick={() => { setShowProfileMenu(false); navigate('/profile'); }}
-                className="w-full text-left px-4 py-2 text-xs font-semibold text-[#071B49] dark:text-[#F1F5FB] hover:bg-[#F8FAFC] dark:hover:bg-[#14283B] flex items-center gap-2 transition-colors cursor-pointer"
+                className="w-full text-left px-4 py-2 text-xs font-semibold text-[#071B49] dark:text-[#F1F5FB] hover:bg-[#F8FAFC] dark:hover:bg-[#162A3E] flex items-center gap-2 transition-colors"
               >
                 <span>View Full Profile</span>
               </button>
@@ -657,7 +506,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
               <button
                 type="button"
                 onClick={() => { setShowProfileMenu(false); navigate('/family-alerts'); }}
-                className="w-full text-left px-4 py-2 text-xs font-semibold text-[#071B49] dark:text-[#F1F5FB] hover:bg-[#F8FAFC] dark:hover:bg-[#14283B] flex items-center gap-2 transition-colors cursor-pointer"
+                className="w-full text-left px-4 py-2 text-xs font-semibold text-[#071B49] dark:text-[#F1F5FB] hover:bg-[#F8FAFC] dark:hover:bg-[#162A3E] flex items-center gap-2 transition-colors"
               >
                 <span>Trusted Contacts</span>
               </button>
@@ -665,9 +514,9 @@ export default function Header({ onMenuClick }: HeaderProps) {
               <button
                 type="button"
                 onClick={() => { setShowProfileMenu(false); navigate('/settings'); }}
-                className="w-full text-left px-4 py-2 text-xs font-semibold text-[#071B49] dark:text-[#F1F5FB] hover:bg-[#F8FAFC] dark:hover:bg-[#14283B] flex items-center gap-2 transition-colors cursor-pointer"
+                className="w-full text-left px-4 py-2 text-xs font-semibold text-[#071B49] dark:text-[#F1F5FB] hover:bg-[#F8FAFC] dark:hover:bg-[#162A3E] flex items-center gap-2 transition-colors"
               >
-                <Settings className="w-3.5 h-3.5 text-[#64748B] dark:text-[#7186A3]" />
+                <Settings className="w-3.5 h-3.5 text-[#64748B] dark:text-[#8297B2]" />
                 <span>Settings & Preferences</span>
               </button>
 
@@ -675,7 +524,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
                 <button
                   type="button"
                   onClick={() => { setShowProfileMenu(false); navigate('/admin/users'); }}
-                  className="w-full text-left px-4 py-2 text-xs font-semibold text-[#2563EB] dark:text-[#4BA3FF] hover:bg-[#F8FAFC] dark:hover:bg-[#14283B] flex items-center gap-2 transition-colors border-t border-[#DCE5EC]/60 dark:border-[#20364A] cursor-pointer"
+                  className="w-full text-left px-4 py-2 text-xs font-semibold text-[#2563EB] dark:text-[#2684FF] hover:bg-[#F8FAFC] dark:hover:bg-[#162A3E] flex items-center gap-2 transition-colors border-t border-[#DCE5EC]/60 dark:border-[#20364A]"
                 >
                   <span>Admin Console</span>
                 </button>
@@ -685,7 +534,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
                 <button 
                   type="button"
                   onClick={logout}
-                  className="w-full text-left px-4 py-2 text-xs text-[#EF476F] dark:text-[#FF5368] hover:bg-[#FFF0F3] dark:hover:bg-[#FF5368]/15 flex items-center gap-2 font-bold transition-colors cursor-pointer"
+                  className="w-full text-left px-4 py-2 text-xs text-[#EF476F] dark:text-[#FF5368] hover:bg-[#FFF0F3] dark:hover:bg-[#2A0E14] flex items-center gap-2 font-bold transition-colors"
                 >
                   <LogOut className="w-3.5 h-3.5" />
                   <span>Sign out</span>

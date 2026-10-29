@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { authService, User } from '../api/auth';
+import { ProfileSkeleton } from '../components/common/Skeleton';
 import { 
   User as UserIcon, 
   Mail, 
@@ -94,25 +95,28 @@ export default function Profile() {
   const [editWeightUnit, setEditWeightUnit] = useState<'kg' | 'lb'>('kg');
   const [editWeightLb, setEditWeightLb] = useState<string>('');
 
+  const fetchProfile = async () => {
+    setIsLoading(true);
+    setError('');
+    try {
+      const data = await authService.getProfile();
+      setUser(data);
+      syncFormFromUser(data);
+    } catch (err: any) {
+      try {
+        const fallbackData = await authService.getCurrentUser();
+        setUser(fallbackData);
+        syncFormFromUser(fallbackData);
+      } catch (innerErr: any) {
+        setError(innerErr.message || 'Failed to load profile');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Fetch initial profile
   useEffect(() => {
-    const fetchProfile = async () => {
-      try {
-        const data = await authService.getProfile();
-        setUser(data);
-        syncFormFromUser(data);
-      } catch (err: any) {
-        try {
-          const fallbackData = await authService.getCurrentUser();
-          setUser(fallbackData);
-          syncFormFromUser(fallbackData);
-        } catch (innerErr: any) {
-          setError(innerErr.message || 'Failed to load profile');
-        }
-      } finally {
-        setIsLoading(false);
-      }
-    };
     fetchProfile();
   }, []);
 
@@ -434,12 +438,7 @@ export default function Profile() {
   };
 
   if (isLoading) {
-    return (
-      <div className="max-w-5xl mx-auto py-24 flex flex-col items-center justify-center space-y-4">
-        <div className="w-10 h-10 border-4 border-[#00A884] border-t-transparent rounded-full animate-spin"></div>
-        <p className="text-[#64748B] font-medium text-sm">Loading MediTrack patient profile...</p>
-      </div>
-    );
+    return <ProfileSkeleton />;
   }
 
   return (
@@ -503,7 +502,7 @@ export default function Profile() {
               >
                 {isSaving ? (
                   <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
                     <span>Saving...</span>
                   </>
                 ) : (
@@ -520,12 +519,22 @@ export default function Profile() {
 
       {/* Global Alerts */}
       {error && (
-        <div className="bg-[#FFF0F3] border border-[#EF476F]/30 text-[#EF476F] p-4 rounded-xl flex items-start gap-3 shadow-2xs">
-          <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-          <div className="text-sm">
-            <p className="font-bold">Attention</p>
-            <p className="font-normal">{error}</p>
+        <div className="bg-[#FFF0F3] border border-[#EF476F]/30 text-[#EF476F] p-4 rounded-xl flex items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+            <div className="text-sm">
+              <p className="font-bold">Attention</p>
+              <p className="font-normal">{error}</p>
+            </div>
           </div>
+          {!user.id && (
+            <button
+              onClick={fetchProfile}
+              className="px-3 py-1.5 bg-[#EF476F]/10 hover:bg-[#EF476F]/20 text-[#EF476F] rounded-lg text-xs font-bold transition-colors shrink-0"
+            >
+              Retry
+            </button>
+          )}
         </div>
       )}
 
@@ -650,7 +659,7 @@ export default function Profile() {
                 >
                   {passwordLoading ? (
                     <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
                       <span>Updating...</span>
                     </>
                   ) : (
@@ -1288,7 +1297,7 @@ export default function Profile() {
                 >
                   {isSaving ? (
                     <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
                       <span>Saving...</span>
                     </>
                   ) : (
@@ -1785,7 +1794,7 @@ export default function Profile() {
               >
                 {isSaving ? (
                   <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
                     <span>Saving...</span>
                   </>
                 ) : (

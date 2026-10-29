@@ -179,8 +179,8 @@ export const reportsService = {
   analyzeSpecialtyGuidance: async (): Promise<{ message: string, guidances: SpecialtyGuidance[], snapshot?: HealthSnapshot }> => {
     return apiClient.post('/api/specialty/analyze', {});
   },
-  chatWithAI: async (message: string): Promise<{ message: string }> => {
-    return apiClient.post('/api/ai/chat', { message });
+  chatWithAI: async (message: string, history?: Array<{ role: string; content: string }>): Promise<{ message: string }> => {
+    return apiClient.post('/api/ai/chat', { message, history });
   },
   getChatHistory: async (): Promise<Array<{ id: string; role: 'user' | 'assistant'; content: string; timestamp: string }>> => {
     return apiClient.get('/api/ai/chat/history');

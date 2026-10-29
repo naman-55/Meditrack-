@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { adminService } from '../../api/admin';
 import { HealthcareFacility } from '../../api/facilities';
 import { Building2, Plus, Edit2, ShieldCheck, Ban, CheckCircle } from 'lucide-react';
+import { Skeleton } from '../../components/common/Skeleton';
 
 export default function AdminFacilities() {
   const [facilities, setFacilities] = useState<HealthcareFacility[]>([]);
@@ -143,7 +144,28 @@ export default function AdminFacilities() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr><td colSpan={4} className="px-6 py-8 text-center text-slate-500">Loading facilities...</td></tr>
+                Array.from({ length: 4 }).map((_, i) => (
+                  <tr key={i}>
+                    <td className="px-6 py-4">
+                      <div className="space-y-1.5">
+                        <Skeleton className="h-4 w-40 rounded" />
+                        <Skeleton className="h-3 w-28 rounded" />
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="space-y-1">
+                        <Skeleton className="h-3 w-48 rounded" />
+                        <Skeleton className="h-3 w-24 rounded" />
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <Skeleton className="h-6 w-24 rounded-md" />
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <Skeleton className="h-7 w-16 rounded-md ml-auto" />
+                    </td>
+                  </tr>
+                ))
               ) : facilities.length === 0 ? (
                 <tr><td colSpan={4} className="px-6 py-8 text-center text-slate-500">No facilities found.</td></tr>
               ) : (

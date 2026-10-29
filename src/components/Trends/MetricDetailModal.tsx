@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { X, Calendar, FileText, CheckCircle2, AlertCircle, Info, ExternalLink } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { X, Calendar, FileText, CheckCircle2, AlertCircle, Info, ExternalLink, RefreshCw } from 'lucide-react';
 import BiomarkerIcon from './BiomarkerIcon';
 import { MetricCardData } from './MetricCard';
 import { 
@@ -8,6 +8,11 @@ import {
   evaluateBiomarkerStatus, 
   getMetricVisualTheme 
 } from './clinicalRules';
+import { 
+  getCompatibleUnits, 
+  convertUnit, 
+  convertReferenceRange 
+} from '../../lib/units';
 
 interface MetricDetailModalProps {
   metric: MetricCardData | null;
@@ -23,17 +28,38 @@ export default function MetricDetailModal({ metric, onClose }: MetricDetailModal
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
+  const [activeUnit, setActiveUnit] = useState<string>(metric?.unit || '');
+
+  useEffect(() => {
+    if (metric) {
+      setActiveUnit(metric.unit);
+    }
+  }, [metric]);
+
   if (!metric) return null;
+
+  const compatibleUnits = getCompatibleUnits(metric.parameter);
+  const isConverted = activeUnit.toLowerCase() !== (metric.unit || '').toLowerCase();
+
+  const latestConv = isConverted 
+    ? convertUnit(metric.latestValue, metric.unit, activeUnit, { parameter: metric.parameter })
+    : { success: true, value: metric.latestValue };
+  const displayLatestValue = latestConv.success && latestConv.value !== null ? latestConv.value : metric.latestValue;
 
   const normKey = normalizeParamKey(metric.parameter);
   const ref = CLINICAL_REFERENCE_RANGES[normKey];
   const theme = getMetricVisualTheme(metric.parameter);
   const evaluation = evaluateBiomarkerStatus(
     metric.parameter,
-    metric.latestValue,
-    metric.unit,
+    displayLatestValue,
+    activeUnit,
     metric.latestSourceText
   );
+
+  const convertedRef = isConverted
+    ? convertReferenceRange(evaluation.referenceRangeText, metric.unit, activeUnit, metric.parameter)
+    : { success: true, formattedRange: evaluation.referenceRangeText };
+  const displayRefText = convertedRef.success ? convertedRef.formattedRange : evaluation.referenceRangeText;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
@@ -58,10 +84,31 @@ export default function MetricDetailModal({ metric, onClose }: MetricDetailModal
                   {evaluation.statusLabel}
                 </span>
               </div>
-              <p className="text-xs text-slate-500 font-medium mt-0.5">
-                Standard Clinical Unit: <span className="font-semibold text-slate-700">{metric.unit}</span>
-                {ref && ` • ${ref.organSystem}`}
-              </p>
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                <p className="text-xs text-slate-500 font-medium">
+                  Active Display Unit: <span className="font-semibold text-slate-700">{activeUnit}</span>
+                  {ref && ` • ${ref.organSystem}`}
+                </p>
+
+                {compatibleUnits.length > 1 && (
+                  <div className="inline-flex rounded-lg border border-slate-200 p-0.5 bg-white text-xs">
+                    {compatibleUnits.map((u) => (
+                      <button
+                        key={u}
+                        type="button"
+                        onClick={() => setActiveUnit(u)}
+                        className={`px-2 py-0.5 rounded-md font-semibold transition-colors ${
+                          activeUnit.toLowerCase() === u.toLowerCase()
+                            ? 'bg-[#00A884] text-white shadow-2xs font-bold'
+                            : 'text-slate-500 hover:text-slate-800'
+                        }`}
+                      >
+                        {u}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -81,13 +128,21 @@ export default function MetricDetailModal({ metric, onClose }: MetricDetailModal
           <div className="bg-slate-50 rounded-xl p-4 border border-slate-200/80 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
             <div>
               <span className="text-slate-400 block uppercase font-bold text-[10px] tracking-wider">Reference Range</span>
-              <span className="font-bold text-slate-800 text-sm">{evaluation.referenceRangeText}</span>
+              <span className="font-bold text-slate-800 text-sm">{displayRefText}</span>
+              {isConverted && (
+                <span className="text-[10px] text-slate-400 block mt-0.5">Orig: {evaluation.referenceRangeText}</span>
+              )}
             </div>
             <div>
               <span className="text-slate-400 block uppercase font-bold text-[10px] tracking-wider">Latest Value</span>
               <span className="font-bold text-slate-800 text-sm">
-                {metric.latestRawValue || metric.latestValue} {metric.unit}
+                {displayLatestValue} {activeUnit}
               </span>
+              {isConverted && (
+                <span className="text-[10px] text-indigo-600 font-semibold block mt-0.5">
+                  Orig: {metric.latestRawValue || metric.latestValue} {metric.unit}
+                </span>
+              )}
             </div>
             <div>
               <span className="text-slate-400 block uppercase font-bold text-[10px] tracking-wider">Observations Count</span>
@@ -97,10 +152,17 @@ export default function MetricDetailModal({ metric, onClose }: MetricDetailModal
 
           {/* OBSERVATIONS TIMELINE TABLE */}
           <div>
-            <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2.5 flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-indigo-500" />
-              Historical Observation Records
-            </h4>
+            <div className="flex items-center justify-between mb-2.5">
+              <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-indigo-500" />
+                Historical Observation Records
+              </h4>
+              {isConverted && (
+                <span className="text-[11px] font-medium text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
+                  Values converted to {activeUnit}
+                </span>
+              )}
+            </div>
 
             {metric.observations.length === 0 ? (
               <p className="text-xs text-slate-400 py-4 text-center">No observation timeline points found.</p>
@@ -110,28 +172,45 @@ export default function MetricDetailModal({ metric, onClose }: MetricDetailModal
                   <thead>
                     <tr className="bg-slate-100/80 text-slate-700 text-[11px] font-bold border-b border-slate-200">
                       <th className="py-2.5 px-3">Date</th>
-                      <th className="py-2.5 px-3">Measured Value</th>
+                      <th className="py-2.5 px-3">Displayed Value ({activeUnit})</th>
+                      {isConverted && <th className="py-2.5 px-3">Original Lab Value</th>}
                       <th className="py-2.5 px-3">Report Document</th>
                       <th className="py-2.5 px-3">Lab Notes & Context</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white">
-                    {metric.observations.map((obs, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50/70">
-                        <td className="py-2.5 px-3 font-semibold text-slate-800 whitespace-nowrap">
-                          {obs.displayDate || obs.date}
-                        </td>
-                        <td className="py-2.5 px-3 font-bold text-emerald-600">
-                          {obs.rawValue || obs.value} {obs.unit || metric.unit}
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-600 truncate max-w-[150px]">
-                          {obs.reportName || `Report #${obs.reportId || idx + 1}`}
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-500 max-w-xs truncate" title={obs.sourceText || ''}>
-                          {obs.sourceText || 'Standard validated record'}
-                        </td>
-                      </tr>
-                    ))}
+                    {metric.observations.map((obs, idx) => {
+                      const obsSourceUnit = obs.unit || metric.unit;
+                      let displayedVal = obs.rawValue || obs.value;
+                      if (isConverted) {
+                        const conv = convertUnit(obs.value, obsSourceUnit, activeUnit, { parameter: metric.parameter });
+                        if (conv.success && conv.value !== null) {
+                          displayedVal = conv.value;
+                        }
+                      }
+
+                      return (
+                        <tr key={idx} className="hover:bg-slate-50/70">
+                          <td className="py-2.5 px-3 font-semibold text-slate-800 whitespace-nowrap">
+                            {obs.displayDate || obs.date}
+                          </td>
+                          <td className="py-2.5 px-3 font-bold text-emerald-600">
+                            {displayedVal} {activeUnit}
+                          </td>
+                          {isConverted && (
+                            <td className="py-2.5 px-3 font-mono text-slate-500">
+                              {obs.rawValue || obs.value} {obsSourceUnit}
+                            </td>
+                          )}
+                          <td className="py-2.5 px-3 text-slate-600 truncate max-w-[150px]">
+                            {obs.reportName || `Report #${obs.reportId || idx + 1}`}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-500 max-w-xs truncate" title={obs.sourceText || ''}>
+                            {obs.sourceText || 'Standard validated record'}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

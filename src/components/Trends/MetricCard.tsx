@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   AreaChart, 
   Area, 
@@ -15,7 +15,8 @@ import {
   ArrowUp, 
   MoreVertical, 
   Info, 
-  Calendar
+  Calendar,
+  RefreshCw
 } from 'lucide-react';
 import BiomarkerIcon from './BiomarkerIcon';
 import { 
@@ -24,6 +25,11 @@ import {
   getMetricVisualTheme,
   getYAxisConfig
 } from './clinicalRules';
+import { 
+  getCompatibleUnits, 
+  convertUnit, 
+  convertReferenceRange 
+} from '../../lib/units';
 
 export interface ObservationPoint {
   date: string;
@@ -63,23 +69,50 @@ interface MetricCardProps {
 export default function MetricCard({ data, className = '', onInspect }: MetricCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
+  // Compatible units & active display unit
+  const compatibleUnits = getCompatibleUnits(data.parameter);
+  const [activeUnit, setActiveUnit] = useState<string>(data.unit);
+
+  useEffect(() => {
+    setActiveUnit(data.unit);
+  }, [data.unit]);
+
+  const isConverted = activeUnit.toLowerCase() !== (data.unit || '').toLowerCase();
+
+  // Convert latest & first value if requested
+  const latestConv = isConverted 
+    ? convertUnit(data.latestValue, data.unit, activeUnit, { parameter: data.parameter })
+    : { success: true, value: data.latestValue };
+  const firstConv = isConverted 
+    ? convertUnit(data.firstValue, data.unit, activeUnit, { parameter: data.parameter })
+    : { success: true, value: data.firstValue };
+
+  const displayLatestValue = latestConv.success && latestConv.value !== null ? latestConv.value : data.latestValue;
+  const displayFirstValue = firstConv.success && firstConv.value !== null ? firstConv.value : data.firstValue;
+
   const theme = getMetricVisualTheme(data.parameter);
   const evaluation = evaluateBiomarkerStatus(
     data.parameter,
-    data.latestValue,
-    data.unit,
+    displayLatestValue,
+    activeUnit,
     data.latestSourceText
   );
 
+  // Convert reference range string to active unit if applicable
+  const convertedRef = isConverted
+    ? convertReferenceRange(evaluation.referenceRangeText, data.unit, activeUnit, data.parameter)
+    : { success: true, formattedRange: evaluation.referenceRangeText };
+  const displayRefText = convertedRef.success ? convertedRef.formattedRange : evaluation.referenceRangeText;
+
   const changeAnalysis = calculateBiomarkerChange(
-    data.firstValue,
-    data.latestValue,
+    displayFirstValue,
+    displayLatestValue,
     data.parameter
   );
 
   const yAxisConfig = getYAxisConfig(data.parameter);
 
-  // Format chart points
+  // Format chart points, converting values when activeUnit != data.unit
   const chartPoints = (data.observations || []).map((obs) => {
     let shortDate = obs.date;
     try {
@@ -89,18 +122,32 @@ export default function MetricCard({ data, className = '', onInspect }: MetricCa
       }
     } catch (e) {}
 
+    let pointValue = obs.value;
+    let pointRawValue = obs.rawValue || obs.value.toString();
+    const sourceObsUnit = obs.unit || data.unit;
+
+    if (isConverted) {
+      const conv = convertUnit(obs.value, sourceObsUnit, activeUnit, { parameter: data.parameter });
+      if (conv.success && conv.value !== null) {
+        pointValue = conv.value;
+        pointRawValue = conv.value.toString();
+      }
+    }
+
     return {
       date: shortDate,
       fullDate: obs.displayDate || obs.date,
-      value: obs.value,
-      rawValue: obs.rawValue || obs.value.toString(),
-      unit: obs.unit || data.unit
+      value: pointValue,
+      rawValue: pointRawValue,
+      unit: activeUnit,
+      originalValue: obs.rawValue || obs.value.toString(),
+      originalUnit: sourceObsUnit
     };
   });
 
   const gradientId = `area-grad-${data.parameter.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
 
-  // Custom Point Label to show numeric values above points (matches design reference)
+  // Custom Point Label to show numeric values above points
   const renderPointLabel = (props: any) => {
     const { x, y, value, index } = props;
     if (value === undefined || value === null) return null;
@@ -135,8 +182,13 @@ export default function MetricCard({ data, className = '', onInspect }: MetricCa
           <p className="text-sm font-bold text-emerald-400">
             {item.rawValue} {item.unit}
           </p>
+          {isConverted && (
+            <p className="text-[10px] text-slate-400 font-mono">
+              Orig: {item.originalValue} {item.originalUnit}
+            </p>
+          )}
           <p className="text-[10px] text-slate-400 border-t border-slate-700 pt-1 mt-1">
-            Ref: {evaluation.referenceRangeText}
+            Ref: {displayRefText}
           </p>
         </div>
       );
@@ -166,9 +218,35 @@ export default function MetricCard({ data, className = '', onInspect }: MetricCa
               >
                 {data.displayName || data.parameter}
               </h3>
-              <p className="text-xs text-[#64748B] font-medium leading-none mt-1">
-                {data.unit || 'Standard Unit'}
-              </p>
+              
+              {/* Unit & Unit Switcher */}
+              <div className="flex items-center gap-1.5 mt-1">
+                <span className="text-xs text-[#64748B] font-medium leading-none">
+                  {activeUnit}
+                </span>
+
+                {compatibleUnits.length > 1 && (
+                  <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5 text-[10px] ml-1">
+                    {compatibleUnits.map((u) => (
+                      <button
+                        key={u}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveUnit(u);
+                        }}
+                        className={`px-1.5 py-0.5 rounded font-semibold transition-colors ${
+                          activeUnit.toLowerCase() === u.toLowerCase()
+                            ? 'bg-white text-[#071B49] shadow-2xs border border-slate-200/80 font-bold'
+                            : 'text-slate-400 hover:text-slate-700'
+                        }`}
+                      >
+                        {u}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -240,7 +318,7 @@ export default function MetricCard({ data, className = '', onInspect }: MetricCa
           ) : chartPoints.length === 1 ? (
             <div className="h-28 flex flex-col items-center justify-center text-slate-500 text-xs bg-slate-50/60 rounded-xl border border-slate-200/80 p-3 text-center">
               <span className="font-bold text-slate-800 text-sm mb-0.5">
-                {chartPoints[0].rawValue} {data.unit}
+                {chartPoints[0].rawValue} {activeUnit}
               </span>
               <span className="text-[11px] text-slate-400">
                 Single observation on {chartPoints[0].fullDate}. At least 2 points needed for trajectory line.
@@ -263,23 +341,23 @@ export default function MetricCard({ data, className = '', onInspect }: MetricCa
                   <CartesianGrid 
                     strokeDasharray="3 3" 
                     vertical={false} 
-                    stroke="var(--chart-grid)" 
+                    stroke="#F1F5F9" 
                   />
 
                   <XAxis 
                     dataKey="date" 
                     axisLine={false} 
                     tickLine={false} 
-                    tick={{ fill: 'var(--chart-label)', fontSize: 11, fontWeight: 500 }} 
+                    tick={{ fill: '#94A3B8', fontSize: 11, fontWeight: 500 }} 
                     dy={6}
                   />
 
                   <YAxis 
-                    domain={yAxisConfig.domain as any}
-                    ticks={yAxisConfig.ticks}
+                    domain={isConverted ? ['auto', 'auto'] : (yAxisConfig.domain as any)}
+                    ticks={isConverted ? undefined : yAxisConfig.ticks}
                     axisLine={false} 
                     tickLine={false} 
-                    tick={{ fill: 'var(--chart-label)', fontSize: 10, fontWeight: 500 }} 
+                    tick={{ fill: '#94A3B8', fontSize: 10, fontWeight: 500 }} 
                     dx={-2}
                   />
 
@@ -296,13 +374,13 @@ export default function MetricCard({ data, className = '', onInspect }: MetricCa
                     dot={{
                       r: 4,
                       fill: theme.chartColor,
-                      stroke: 'var(--chart-dot-outline)',
+                      stroke: '#FFFFFF',
                       strokeWidth: 2
                     }}
                     activeDot={{
                       r: 6,
                       fill: theme.chartColor,
-                      stroke: 'var(--chart-dot-outline)',
+                      stroke: '#FFFFFF',
                       strokeWidth: 2
                     }}
                   />
@@ -324,13 +402,20 @@ export default function MetricCard({ data, className = '', onInspect }: MetricCa
         >
           <div className="min-w-0 flex-1 pr-1">
             <p className="text-sm font-bold text-[#101B3D] leading-tight whitespace-nowrap">
-              {data.latestRawValue !== undefined && data.latestRawValue !== null 
-                ? `${data.latestRawValue} ${data.unit}`.trim() 
+              {displayLatestValue !== undefined && displayLatestValue !== null 
+                ? `${displayLatestValue} ${activeUnit}`.trim() 
                 : '—'}
             </p>
-            <p className="text-[10px] text-[#64748B] font-medium leading-none mt-1 whitespace-nowrap">
-              Latest Value
-            </p>
+            <div className="flex items-center gap-1 mt-1">
+              <p className="text-[10px] text-[#64748B] font-medium leading-none whitespace-nowrap">
+                Latest Value
+              </p>
+              {isConverted && (
+                <span className="text-[9px] bg-indigo-50 text-indigo-700 px-1 py-0.2 rounded font-semibold border border-indigo-100" title={`Original lab report value: ${data.latestRawValue || data.latestValue} ${data.unit}`}>
+                  converted
+                </span>
+              )}
+            </div>
           </div>
           <FileText className="w-4 h-4 text-slate-400 group-hover/panel:text-indigo-600 shrink-0 ml-1 transition-colors" />
         </button>
@@ -338,7 +423,7 @@ export default function MetricCard({ data, className = '', onInspect }: MetricCa
         {/* SECTION D: CHANGE-SUMMARY PANEL */}
         <div 
           className="bg-[#F8FAFC] rounded-xl px-3 py-2 border border-slate-200/70 flex items-center gap-1.5 min-w-0"
-          title={`Starting observation: ${changeAnalysis.firstValueStr} ${data.unit} → Latest: ${changeAnalysis.latestValueStr} ${data.unit}`}
+          title={`Starting observation: ${changeAnalysis.firstValueStr} ${activeUnit} → Latest: ${changeAnalysis.latestValueStr} ${activeUnit}`}
         >
           <div className="shrink-0">
             {changeAnalysis.iconType === 'minus' && (

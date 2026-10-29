@@ -23,6 +23,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { reportsService, Measurement, Contradiction, MedicalReport } from '../api/reports';
 import { generatePDFReport, ReportData } from '../utils/pdfExport';
+import { Skeleton, MetricCardSkeleton } from '../components/common/Skeleton';
 import { 
   CLINICAL_REFERENCE_RANGES, 
   normalizeParamKey, 
@@ -159,7 +160,7 @@ export default function Timeline() {
         category = 'Metabolic Panel';
       } else if (['hdl', 'ldl', 'total_cholesterol', 'triglycerides'].includes(normKey)) {
         category = 'Lipid Profile';
-      } else if (['blood_pressure', 'systolic_bp', 'diastolic_bp', 'heart_rate', 'pulse'].includes(normKey)) {
+      } else if (normKey === 'blood_pressure') {
         category = 'Vital Signs';
       }
 
@@ -351,21 +352,37 @@ export default function Timeline() {
 
   return (
     <div id="timeline-content" className="space-y-6 pb-12 max-w-7xl mx-auto">
+      {/* ERROR ALERT */}
+      {error && (
+        <div className="bg-rose-50 border border-rose-200 text-rose-800 px-4 py-3 rounded-2xl flex items-center justify-between shadow-xs animate-in fade-in">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+            <span className="text-sm font-semibold">{error}</span>
+          </div>
+          <button 
+            onClick={fetchData}
+            className="text-xs bg-rose-200 hover:bg-rose-300 text-rose-900 font-bold px-3 py-1.5 rounded-lg transition-colors shrink-0"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* SECTION 2: HEADER */}
-      <div className="bg-white dark:bg-[#0D1B2A] rounded-2xl border border-slate-200/90 dark:border-[#20364A] p-5 sm:p-6 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+      <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-5">
         {/* Left Side: Icon + Title + Subtitle */}
         <div className="flex items-center gap-4">
           <div 
-            className="w-12 h-12 rounded-xl bg-[#EBF3FF] dark:bg-[#0B1E33] text-[#2563EB] dark:text-[#2684FF] border border-transparent dark:border-[#1E3B5C]/60 flex items-center justify-center shrink-0 shadow-2xs"
+            className="w-12 h-12 rounded-xl bg-[#EBF3FF] text-[#2563EB] flex items-center justify-center shrink-0 shadow-2xs"
             aria-hidden="true"
           >
             <Activity className="w-6 h-6 stroke-[2.2]" />
           </div>
           <div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-[#101B3D] dark:text-[#F1F5FB] tracking-tight leading-tight">
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-[#101B3D] tracking-tight leading-tight">
               Health Timeline & Data Quality
             </h1>
-            <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#8297B2] font-medium mt-0.5">
+            <p className="text-xs sm:text-sm text-[#64748B] font-medium mt-0.5">
               Longitudinal view of extracted report measurements and detected contradictions.
             </p>
           </div>
@@ -381,15 +398,15 @@ export default function Timeline() {
                 setReportDropdownOpen(!reportDropdownOpen);
                 setFilterDropdownOpen(false);
               }}
-              className="flex items-center gap-2 px-3.5 py-2.5 bg-white dark:bg-[#081421] hover:bg-slate-50 dark:hover:bg-[#14283B] text-[#101B3D] dark:text-[#F1F5FB] border border-slate-200/90 dark:border-[#20364A] rounded-xl font-semibold text-xs sm:text-sm shadow-2xs transition-colors focus:outline-hidden focus:ring-2 focus:ring-blue-500 dark:focus:ring-[#00D6B0] whitespace-nowrap"
+              className="flex items-center gap-2 px-3.5 py-2.5 bg-white hover:bg-slate-50 text-[#101B3D] border border-slate-200/90 rounded-xl font-semibold text-xs sm:text-sm shadow-2xs transition-colors focus:outline-hidden focus:ring-2 focus:ring-blue-500 whitespace-nowrap"
               aria-label="Select report or date range"
               aria-expanded={reportDropdownOpen}
             >
-              <Calendar className="w-4 h-4 text-slate-500 dark:text-[#8297B2] shrink-0" />
+              <Calendar className="w-4 h-4 text-slate-500 shrink-0" />
               <span className="truncate max-w-[200px] sm:max-w-[260px] lg:max-w-none">
                 {activeReportLabel}
               </span>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 dark:text-[#8297B2] shrink-0" />
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
             </button>
 
             {reportDropdownOpen && (
@@ -398,8 +415,8 @@ export default function Timeline() {
                   className="fixed inset-0 z-20" 
                   onClick={() => setReportDropdownOpen(false)} 
                 />
-                <div className="absolute right-0 top-11 z-30 w-72 bg-white dark:bg-[#081421] rounded-xl shadow-xl border border-slate-200 dark:border-[#20364A] py-1.5 text-xs text-slate-700 dark:text-[#B4C4D8] animate-in fade-in zoom-in-95">
-                  <div className="px-3.5 py-1.5 text-[10px] font-bold text-slate-400 dark:text-[#8297B2] uppercase tracking-wider">
+                <div className="absolute right-0 top-11 z-30 w-72 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 text-xs text-slate-700 animate-in fade-in zoom-in-95">
+                  <div className="px-3.5 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                     Filter by Report Date
                   </div>
                   <button
@@ -408,12 +425,12 @@ export default function Timeline() {
                       setSelectedReportId('all');
                       setReportDropdownOpen(false);
                     }}
-                    className={`w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-[#14283B] text-slate-700 dark:text-[#F1F5FB] flex items-center justify-between ${
-                      selectedReportId === 'all' ? 'bg-blue-50/70 text-blue-700 dark:bg-[#0B302B] dark:text-[#00D6B0] font-bold' : ''
+                    className={`w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center justify-between ${
+                      selectedReportId === 'all' ? 'bg-blue-50/70 text-blue-700 font-bold' : ''
                     }`}
                   >
                     <span>All Reports (All Dates)</span>
-                    {selectedReportId === 'all' && <Check className="w-4 h-4 text-blue-600 dark:text-[#00D6B0] shrink-0 ml-2" />}
+                    {selectedReportId === 'all' && <Check className="w-4 h-4 text-blue-600 shrink-0 ml-2" />}
                   </button>
                   {reportOptions.map((opt) => (
                     <button
@@ -423,12 +440,12 @@ export default function Timeline() {
                         setSelectedReportId(opt.date);
                         setReportDropdownOpen(false);
                       }}
-                      className={`w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-[#14283B] text-slate-700 dark:text-[#F1F5FB] flex items-center justify-between ${
-                        selectedReportId === opt.date ? 'bg-blue-50/70 text-blue-700 dark:bg-[#0B302B] dark:text-[#00D6B0] font-bold' : ''
+                      className={`w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center justify-between ${
+                        selectedReportId === opt.date ? 'bg-blue-50/70 text-blue-700 font-bold' : ''
                       }`}
                     >
                       <span>{opt.label}</span>
-                      {selectedReportId === opt.date && <Check className="w-4 h-4 text-blue-600 dark:text-[#00D6B0] shrink-0 ml-2" />}
+                      {selectedReportId === opt.date && <Check className="w-4 h-4 text-blue-600 shrink-0 ml-2" />}
                     </button>
                   ))}
                 </div>
@@ -444,14 +461,14 @@ export default function Timeline() {
                 setFilterDropdownOpen(!filterDropdownOpen);
                 setReportDropdownOpen(false);
               }}
-              className="flex items-center gap-2 px-3.5 sm:px-4 py-2.5 bg-white dark:bg-[#081421] hover:bg-slate-50 dark:hover:bg-[#14283B] text-[#101B3D] dark:text-[#F1F5FB] border border-slate-200/90 dark:border-[#20364A] rounded-xl font-semibold text-xs sm:text-sm shadow-2xs transition-colors focus:outline-hidden focus:ring-2 focus:ring-blue-500 dark:focus:ring-[#00D6B0]"
+              className="flex items-center gap-2 px-3.5 sm:px-4 py-2.5 bg-white hover:bg-slate-50 text-[#101B3D] border border-slate-200/90 rounded-xl font-semibold text-xs sm:text-sm shadow-2xs transition-colors focus:outline-hidden focus:ring-2 focus:ring-blue-500"
               aria-label="Filter timeline"
               aria-expanded={filterDropdownOpen}
             >
-              <Filter className="w-4 h-4 text-slate-500 dark:text-[#8297B2]" />
+              <Filter className="w-4 h-4 text-slate-500" />
               <span>Filter</span>
               {(selectedCategory !== 'all' || selectedStatus !== 'all') && (
-                <span className="w-2 h-2 rounded-full bg-blue-600 dark:bg-[#00D6B0]" />
+                <span className="w-2 h-2 rounded-full bg-blue-600" />
               )}
             </button>
 
@@ -461,19 +478,18 @@ export default function Timeline() {
                   className="fixed inset-0 z-20" 
                   onClick={() => setFilterDropdownOpen(false)} 
                 />
-                <div className="absolute right-0 top-11 z-30 w-64 bg-white dark:bg-[#081421] rounded-xl shadow-xl border border-slate-200 dark:border-[#20364A] p-3 text-xs text-slate-700 dark:text-[#B4C4D8] animate-in fade-in zoom-in-95 space-y-3">
+                <div className="absolute right-0 top-11 z-30 w-64 bg-white rounded-xl shadow-xl border border-slate-200 p-3 text-xs text-slate-700 animate-in fade-in zoom-in-95 space-y-3">
                   <div>
-                    <label className="text-[10px] font-bold text-slate-400 dark:text-[#8297B2] uppercase tracking-wider block mb-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
                       Category
                     </label>
                     <select
                       value={selectedCategory}
                       onChange={(e) => setSelectedCategory(e.target.value)}
-                      className="w-full bg-slate-50 dark:bg-[#0D1B2A] border border-slate-200 dark:border-[#263D53] rounded-lg p-2 text-xs text-slate-800 dark:text-[#F1F5FB] font-medium focus:outline-hidden focus:ring-1 focus:ring-blue-500 dark:focus:ring-[#00D6B0]"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs text-slate-800 font-medium focus:outline-hidden focus:ring-1 focus:ring-blue-500"
                     >
                       <option value="all">All Categories</option>
                       <option value="Complete Blood Count (CBC)">Complete Blood Count (CBC)</option>
-                      <option value="Vital Signs">Vital Signs</option>
                       <option value="Liver & Hepatic Function">Liver & Hepatic Function</option>
                       <option value="Renal & Kidney Function">Renal & Kidney Function</option>
                       <option value="Metabolic Panel">Metabolic Panel</option>
@@ -482,13 +498,13 @@ export default function Timeline() {
                   </div>
 
                   <div>
-                    <label className="text-[10px] font-bold text-slate-400 dark:text-[#8297B2] uppercase tracking-wider block mb-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
                       Clinical Status
                     </label>
                     <select
                       value={selectedStatus}
                       onChange={(e) => setSelectedStatus(e.target.value)}
-                      className="w-full bg-slate-50 dark:bg-[#0D1B2A] border border-slate-200 dark:border-[#263D53] rounded-lg p-2 text-xs text-slate-800 dark:text-[#F1F5FB] font-medium focus:outline-hidden focus:ring-1 focus:ring-blue-500 dark:focus:ring-[#00D6B0]"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs text-slate-800 font-medium focus:outline-hidden focus:ring-1 focus:ring-blue-500"
                     >
                       <option value="all">All Statuses</option>
                       <option value="normal">Normal Only</option>
@@ -504,7 +520,7 @@ export default function Timeline() {
                         setSelectedCategory('all');
                         setSelectedStatus('all');
                       }}
-                      className="w-full py-1.5 text-center text-xs font-semibold text-blue-600 dark:text-[#00D6B0] hover:text-blue-800 dark:hover:text-[#20D6A1] bg-blue-50/80 dark:bg-[#14283B] rounded-lg transition-colors"
+                      className="w-full py-1.5 text-center text-xs font-semibold text-blue-600 hover:text-blue-800 bg-blue-50/80 rounded-lg"
                     >
                       Reset Filters
                     </button>
@@ -520,10 +536,14 @@ export default function Timeline() {
             onClick={handleExportPDF}
             disabled={isExporting || filteredEntries.length === 0}
             data-html2canvas-ignore="true"
-            className="flex items-center gap-2 px-3.5 sm:px-4 py-2.5 bg-white dark:bg-[#081421] hover:bg-slate-50 dark:hover:bg-[#14283B] text-[#101B3D] dark:text-[#F1F5FB] border border-slate-200/90 dark:border-[#20364A] rounded-xl font-semibold text-xs sm:text-sm shadow-2xs hover:shadow-xs transition-colors focus:outline-hidden focus:ring-2 focus:ring-blue-500 dark:focus:ring-[#00D6B0] disabled:opacity-50"
+            className="flex items-center gap-2 px-3.5 sm:px-4 py-2.5 bg-white hover:bg-slate-50 text-[#101B3D] border border-slate-200/90 rounded-xl font-semibold text-xs sm:text-sm shadow-2xs hover:shadow-xs transition-colors focus:outline-hidden focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
             title="Export timeline measurements to PDF"
           >
-            <Download className="w-4 h-4 text-slate-600 dark:text-[#8297B2]" />
+            {isExporting ? (
+              <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
+            ) : (
+              <Download className="w-4 h-4 text-slate-600" />
+            )}
             <span>Export</span>
           </button>
         </div>
@@ -531,115 +551,126 @@ export default function Timeline() {
 
       {/* SECTION 3: SUMMARY STATISTICS GRID (4 equal-width cards) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* CARD 1: TOTAL MEASUREMENTS */}
-        <div className="bg-white dark:bg-[#0D1B2A] rounded-2xl border border-slate-200/90 dark:border-[#20364A] p-4 sm:p-5 shadow-xs flex items-center gap-3.5 hover:shadow-md dark:hover:border-[#2684FF]/40 transition-all min-w-0">
-          <div 
-            className="w-12 h-12 rounded-xl bg-[#EBF3FF] dark:bg-[#0B2545]/60 text-[#2563EB] dark:text-[#2684FF] flex items-center justify-center shrink-0 shadow-2xs"
-            aria-hidden="true"
-          >
-            <FileText className="w-6 h-6 stroke-[2.2]" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-2xl sm:text-3xl font-extrabold text-[#101B3D] dark:text-[#F1F5FB] tracking-tight leading-none mb-1">
-              {summaryStats.totalMeasurements}
-            </p>
-            <p className="text-xs sm:text-sm font-bold text-[#101B3D] dark:text-[#F1F5FB] leading-tight">
-              Total Measurements
-            </p>
-            <p className="text-[11px] text-[#64748B] dark:text-[#8297B2] font-medium leading-tight mt-0.5">
-              from extracted reports
-            </p>
-          </div>
-        </div>
+        {loading ? (
+          <>
+            <MetricCardSkeleton />
+            <MetricCardSkeleton />
+            <MetricCardSkeleton />
+            <MetricCardSkeleton />
+          </>
+        ) : (
+          <>
+            {/* CARD 1: TOTAL MEASUREMENTS */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 sm:p-5 shadow-xs flex items-center gap-3.5 hover:shadow-md transition-shadow min-w-0">
+              <div 
+                className="w-12 h-12 rounded-xl bg-[#EBF3FF] text-[#2563EB] flex items-center justify-center shrink-0 shadow-2xs"
+                aria-hidden="true"
+              >
+                <FileText className="w-6 h-6 stroke-[2.2]" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-2xl sm:text-3xl font-extrabold text-[#101B3D] tracking-tight leading-none mb-1">
+                  {summaryStats.totalMeasurements}
+                </p>
+                <p className="text-xs sm:text-sm font-bold text-[#101B3D] leading-tight">
+                  Total Measurements
+                </p>
+                <p className="text-[11px] text-[#64748B] font-medium leading-tight mt-0.5">
+                  from extracted reports
+                </p>
+              </div>
+            </div>
 
-        {/* CARD 2: VALIDATED MEASUREMENTS */}
-        <div className="bg-white dark:bg-[#0D1B2A] rounded-2xl border border-slate-200/90 dark:border-[#20364A] p-4 sm:p-5 shadow-xs flex items-center gap-3.5 hover:shadow-md dark:hover:border-[#00D6B0]/40 transition-all min-w-0">
-          <div 
-            className="w-12 h-12 rounded-xl bg-[#ECFDF5] dark:bg-[#063328]/60 text-[#059669] dark:text-[#00D6B0] flex items-center justify-center shrink-0 shadow-2xs"
-            aria-hidden="true"
-          >
-            <CheckCircle2 className="w-6 h-6 stroke-[2.2]" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-2xl sm:text-3xl font-extrabold text-[#101B3D] dark:text-[#F1F5FB] tracking-tight leading-none mb-1">
-              {summaryStats.validatedMeasurements}
-            </p>
-            <p className="text-xs sm:text-sm font-bold text-[#101B3D] dark:text-[#F1F5FB] leading-tight">
-              Validated Measurements
-            </p>
-            <p className="text-[11px] text-[#64748B] dark:text-[#8297B2] font-medium leading-tight mt-0.5">
-              Passed quality checks
-            </p>
-          </div>
-        </div>
+            {/* CARD 2: VALIDATED MEASUREMENTS */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 sm:p-5 shadow-xs flex items-center gap-3.5 hover:shadow-md transition-shadow min-w-0">
+              <div 
+                className="w-12 h-12 rounded-xl bg-[#ECFDF5] text-[#059669] flex items-center justify-center shrink-0 shadow-2xs"
+                aria-hidden="true"
+              >
+                <CheckCircle2 className="w-6 h-6 stroke-[2.2]" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-2xl sm:text-3xl font-extrabold text-[#101B3D] tracking-tight leading-none mb-1">
+                  {summaryStats.validatedMeasurements}
+                </p>
+                <p className="text-xs sm:text-sm font-bold text-[#101B3D] leading-tight">
+                  Validated Measurements
+                </p>
+                <p className="text-[11px] text-[#64748B] font-medium leading-tight mt-0.5">
+                  Passed quality checks
+                </p>
+              </div>
+            </div>
 
-        {/* CARD 3: DETECTED CONTRADICTIONS */}
-        <div className="bg-white dark:bg-[#0D1B2A] rounded-2xl border border-slate-200/90 dark:border-[#20364A] p-4 sm:p-5 shadow-xs flex items-center gap-3.5 hover:shadow-md dark:hover:border-[#F5B942]/40 transition-all min-w-0">
-          <div 
-            className="w-12 h-12 rounded-xl bg-[#FFFBEB] dark:bg-[#3B290C]/60 text-[#D97706] dark:text-[#F5B942] flex items-center justify-center shrink-0 shadow-2xs"
-            aria-hidden="true"
-          >
-            <AlertTriangle className="w-6 h-6 stroke-[2.2]" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-2xl sm:text-3xl font-extrabold text-[#101B3D] dark:text-[#F1F5FB] tracking-tight leading-none mb-1">
-              {summaryStats.contradictionsCount}
-            </p>
-            <p className="text-xs sm:text-sm font-bold text-[#101B3D] dark:text-[#F1F5FB] leading-tight">
-              Detected Contradictions
-            </p>
-            <p className="text-[11px] text-[#64748B] dark:text-[#8297B2] font-medium leading-tight mt-0.5">
-              {summaryStats.contradictionsCount === 0 
-                ? 'No conflicting values found' 
-                : `${summaryStats.contradictionsCount} conflicting readings`}
-            </p>
-          </div>
-        </div>
+            {/* CARD 3: DETECTED CONTRADICTIONS */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 sm:p-5 shadow-xs flex items-center gap-3.5 hover:shadow-md transition-shadow min-w-0">
+              <div 
+                className="w-12 h-12 rounded-xl bg-[#FFFBEB] text-[#D97706] flex items-center justify-center shrink-0 shadow-2xs"
+                aria-hidden="true"
+              >
+                <AlertTriangle className="w-6 h-6 stroke-[2.2]" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-2xl sm:text-3xl font-extrabold text-[#101B3D] tracking-tight leading-none mb-1">
+                  {summaryStats.contradictionsCount}
+                </p>
+                <p className="text-xs sm:text-sm font-bold text-[#101B3D] leading-tight">
+                  Detected Contradictions
+                </p>
+                <p className="text-[11px] text-[#64748B] font-medium leading-tight mt-0.5">
+                  {summaryStats.contradictionsCount === 0 
+                    ? 'No conflicting values found' 
+                    : `${summaryStats.contradictionsCount} conflicting readings`}
+                </p>
+              </div>
+            </div>
 
-        {/* CARD 4: UNIQUE PARAMETERS */}
-        <div className="bg-white dark:bg-[#0D1B2A] rounded-2xl border border-slate-200/90 dark:border-[#20364A] p-4 sm:p-5 shadow-xs flex items-center gap-3.5 hover:shadow-md dark:hover:border-[#8957FF]/40 transition-all min-w-0">
-          <div 
-            className="w-12 h-12 rounded-xl bg-[#F3E8FF] dark:bg-[#2D1B4E]/60 text-[#7C3AED] dark:text-[#8957FF] flex items-center justify-center shrink-0 shadow-2xs"
-            aria-hidden="true"
-          >
-            <BarChart2 className="w-6 h-6 stroke-[2.2]" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-2xl sm:text-3xl font-extrabold text-[#101B3D] dark:text-[#F1F5FB] tracking-tight leading-none mb-1">
-              {summaryStats.uniqueParameters}
-            </p>
-            <p className="text-xs sm:text-sm font-bold text-[#101B3D] dark:text-[#F1F5FB] leading-tight">
-              Unique Parameters
-            </p>
-            <p className="text-[11px] text-[#64748B] dark:text-[#8297B2] font-medium leading-tight mt-0.5">
-              Across all reports
-            </p>
-          </div>
-        </div>
+            {/* CARD 4: UNIQUE PARAMETERS */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 sm:p-5 shadow-xs flex items-center gap-3.5 hover:shadow-md transition-shadow min-w-0">
+              <div 
+                className="w-12 h-12 rounded-xl bg-[#F3E8FF] text-[#7C3AED] flex items-center justify-center shrink-0 shadow-2xs"
+                aria-hidden="true"
+              >
+                <BarChart2 className="w-6 h-6 stroke-[2.2]" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-2xl sm:text-3xl font-extrabold text-[#101B3D] tracking-tight leading-none mb-1">
+                  {summaryStats.uniqueParameters}
+                </p>
+                <p className="text-xs sm:text-sm font-bold text-[#101B3D] leading-tight">
+                  Unique Parameters
+                </p>
+                <p className="text-[11px] text-[#64748B] font-medium leading-tight mt-0.5">
+                  Across all reports
+                </p>
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* CONTRADICTIONS ALERT PANEL (When nonzero contradictions are present) */}
       {contradictions.length > 0 && (
-        <div className="bg-amber-50 dark:bg-[#1C1608] rounded-2xl p-5 border border-amber-200 dark:border-[#80652A] shadow-xs space-y-3">
-          <div className="flex items-center gap-2 text-amber-800 dark:text-[#F5B942]">
-            <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-[#F5B942] shrink-0" />
+        <div className="bg-amber-50 rounded-2xl p-5 border border-amber-200 shadow-xs space-y-3">
+          <div className="flex items-center gap-2 text-amber-800">
+            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
             <h2 className="text-sm font-bold uppercase tracking-wider">
               Data Quality & Temporal Contradiction Alerts ({contradictions.length})
             </h2>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {contradictions.map((c) => (
-              <div key={c.id} className="bg-white dark:bg-[#0D1B2A] p-3.5 rounded-xl border border-amber-200 dark:border-[#80652A] text-xs space-y-1 shadow-2xs">
+              <div key={c.id} className="bg-white p-3.5 rounded-xl border border-amber-200 text-xs space-y-1 shadow-2xs">
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-amber-900 dark:text-[#F1F5FB] capitalize">{c.parameter}</span>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 dark:bg-[#302719] text-amber-800 dark:text-[#F5B942] border border-transparent dark:border-[#80652A]">
+                  <span className="font-bold text-amber-900 capitalize">{c.parameter}</span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">
                     {c.severity}
                   </span>
                 </div>
-                <p className="text-slate-600 dark:text-[#B4C4D8]">
-                  <strong className="text-slate-800 dark:text-[#F1F5FB]">{c.value_a}</strong> ({c.date_a}) vs <strong className="text-slate-800 dark:text-[#F1F5FB]">{c.value_b}</strong> ({c.date_b})
+                <p className="text-slate-600">
+                  <strong className="text-slate-800">{c.value_a}</strong> ({c.date_a}) vs <strong className="text-slate-800">{c.value_b}</strong> ({c.date_b})
                 </p>
-                <p className="text-[11px] text-slate-500 dark:text-[#8297B2] italic">Reason: {c.reason}</p>
+                <p className="text-[11px] text-slate-500 italic">Reason: {c.reason}</p>
               </div>
             ))}
           </div>
@@ -647,42 +678,42 @@ export default function Timeline() {
       )}
 
       {/* SECTION 4: MAIN TIMELINE PANEL */}
-      <div className="bg-white dark:bg-[#0D1B2A] rounded-2xl border border-slate-200/90 dark:border-[#20364A] shadow-xs p-5 sm:p-7">
+      <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-5 sm:p-7">
         {/* Top Header of Main Panel with Heading & Status Legend */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 mb-6 border-b border-slate-100 dark:border-[#1B3044]">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 mb-6 border-b border-slate-100">
           <div className="flex items-center gap-3.5">
             <div 
-              className="w-10 h-10 rounded-xl bg-[#EBF3FF] dark:bg-[#0B1E33] text-[#2563EB] dark:text-[#2684FF] border border-transparent dark:border-[#1E3B5C]/60 flex items-center justify-center shrink-0 shadow-2xs"
+              className="w-10 h-10 rounded-xl bg-[#EBF3FF] text-[#2563EB] flex items-center justify-center shrink-0 shadow-2xs"
               aria-hidden="true"
             >
               <List className="w-5 h-5 stroke-[2.2]" />
             </div>
             <div>
-              <h2 className="text-base sm:text-lg font-bold text-[#101B3D] dark:text-[#F1F5FB] tracking-tight">
+              <h2 className="text-base sm:text-lg font-bold text-[#101B3D] tracking-tight">
                 Extracted Validated Measurements
               </h2>
-              <p className="text-xs text-[#64748B] dark:text-[#8297B2] font-medium mt-0.5">
+              <p className="text-xs text-[#64748B] font-medium mt-0.5">
                 Chronological timeline of all extracted measurements from your reports.
               </p>
             </div>
           </div>
 
           {/* Compact Status Legend */}
-          <div className="flex items-center gap-4 text-xs font-semibold text-slate-600 dark:text-[#B4C4D8] self-start sm:self-auto shrink-0 bg-slate-50/80 dark:bg-[#081421] px-3.5 py-1.5 rounded-xl border border-slate-200/60 dark:border-[#20364A]">
+          <div className="flex items-center gap-4 text-xs font-semibold text-slate-600 self-start sm:self-auto shrink-0 bg-slate-50/80 px-3.5 py-1.5 rounded-xl border border-slate-200/60">
             <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 dark:bg-[#20D6A1]" />
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
               <span>Normal</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-500 dark:bg-[#F5B942]" />
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
               <span>High</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 dark:bg-[#FF5368]" />
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
               <span>Low</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-slate-400 dark:bg-[#A6B8CF]" />
+              <span className="w-2.5 h-2.5 rounded-full bg-slate-400" />
               <span>Unknown</span>
             </div>
           </div>
@@ -690,22 +721,38 @@ export default function Timeline() {
 
         {/* LOADING STATE */}
         {loading ? (
-          <div className="space-y-4 py-8">
-            {[1, 2, 3, 4].map(i => (
-              <div key={i} className="flex gap-4 items-center animate-pulse">
-                <div className="w-16 h-16 bg-slate-100 dark:bg-[#102033] rounded-xl shrink-0" />
-                <div className="flex-1 h-20 bg-slate-100 dark:bg-[#0B1928] dark:border dark:border-[#20364A] rounded-2xl" />
+          <div className="space-y-4 py-4">
+            {[1, 2, 3, 4, 5].map(i => (
+              <div key={i} className="flex items-stretch gap-3 sm:gap-4">
+                <Skeleton className="w-20 sm:w-24 h-24 rounded-2xl shrink-0" />
+                <div className="flex-1 p-4 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-[#20364A] bg-white dark:bg-[#0D1B2A] space-y-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <Skeleton className="w-10 h-10 rounded-xl shrink-0" />
+                      <div className="space-y-1.5">
+                        <Skeleton className="h-4 w-36 sm:w-48 rounded-md" />
+                        <Skeleton className="h-3 w-24 rounded-md" />
+                      </div>
+                    </div>
+                    <Skeleton className="h-6 w-20 rounded-full" />
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
+                    <Skeleton className="h-4 w-full rounded-md" />
+                    <Skeleton className="h-4 w-full rounded-md" />
+                    <Skeleton className="h-4 w-full rounded-md hidden sm:block" />
+                  </div>
+                </div>
               </div>
             ))}
           </div>
-        ) : filteredEntries.length === 0 ? (
+        ) : error && filteredEntries.length === 0 ? null : filteredEntries.length === 0 ? (
           /* EMPTY STATE */
           <div className="py-16 text-center space-y-3">
-            <div className="w-14 h-14 rounded-2xl bg-blue-50 dark:bg-[#0B2545]/60 text-blue-600 dark:text-[#2684FF] flex items-center justify-center mx-auto">
+            <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto">
               <Activity className="w-7 h-7" />
             </div>
-            <h3 className="text-base font-bold text-[#101B3D] dark:text-[#F1F5FB]">No matching measurements found</h3>
-            <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#8297B2] max-w-sm mx-auto">
+            <h3 className="text-base font-bold text-[#101B3D]">No matching measurements found</h3>
+            <p className="text-xs sm:text-sm text-[#64748B] max-w-sm mx-auto">
               {selectedReportId !== 'all' || selectedCategory !== 'all' || selectedStatus !== 'all'
                 ? 'Try clearing the active category, status, or report date filters.'
                 : 'Upload medical reports to automatically extract and populate longitudinal measurements.'}
@@ -721,29 +768,29 @@ export default function Timeline() {
                 <div key={entry.id} className="relative flex items-stretch gap-3 sm:gap-4 group">
                   {/* Vertical Timeline Marker & Connecting Line */}
                   <div className="flex flex-col items-center shrink-0 w-4 relative z-10 pt-5">
-                    {/* Circle Dot Marker (Teal outline with dark interior in Dark Mode) */}
-                    <div className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white ring-2 ring-emerald-500/25 dark:bg-[#050D18] dark:border-[#00D6B0] dark:ring-0 group-hover:scale-125 transition-transform shrink-0" />
+                    {/* Circle Dot Marker */}
+                    <div className="w-3.5 h-3.5 rounded-full bg-emerald-500 dark:bg-[#040D1A] border-2 border-white dark:border-[#00D6B0] ring-2 ring-emerald-500/25 dark:ring-[#00D6B0]/20 group-hover:scale-125 transition-transform shrink-0" />
                     {/* Connecting vertical line (unless last item) */}
                     {index < filteredEntries.length - 1 && (
-                      <div className="w-0.5 bg-slate-200 dark:bg-[#1B3044] flex-1 my-1" />
+                      <div className="w-0.5 bg-slate-200 dark:bg-[#0C3438] flex-1 my-1" />
                     )}
                   </div>
 
                   {/* SECTION 5A: DATE & TIME CARD */}
-                  <div className="shrink-0 w-20 sm:w-24 bg-[#F8FAFC] dark:bg-[#102033] border border-slate-200/80 dark:border-[#20364A] rounded-2xl p-2.5 sm:p-3 text-center flex flex-col justify-center shadow-2xs">
-                    <p className="text-xl sm:text-2xl font-black text-[#101B3D] dark:text-[#F1F5FB] tracking-tight leading-none">
+                  <div className="shrink-0 w-20 sm:w-24 bg-[#F8FAFC] dark:bg-[#050E1A] border border-slate-200/80 dark:border-[#152A42] rounded-2xl p-2.5 sm:p-3 text-center flex flex-col justify-center shadow-2xs">
+                    <p className="text-xl sm:text-2xl font-black text-[#101B3D] dark:text-white tracking-tight leading-none">
                       {entry.displayDay}
                     </p>
                     <p className="text-[11px] font-bold text-slate-500 dark:text-[#8297B2] mt-1 uppercase tracking-wider leading-none">
                       {entry.displayMonthYear}
                     </p>
-                    <p className="text-[10px] text-slate-400 dark:text-[#8297B2] font-medium mt-1 leading-none">
+                    <p className="text-[10px] text-slate-400 dark:text-[#647A96] font-medium mt-1 leading-none">
                       {entry.displayTime}
                     </p>
                   </div>
 
                   {/* HORIZONTAL MEASUREMENT CARD CONTAINER */}
-                  <div className="flex-1 min-w-0 bg-white dark:bg-[#0B1928] rounded-2xl border border-slate-200/90 dark:border-[#20364A] shadow-2xs hover:shadow-xs dark:hover:bg-[#0E2034] transition-colors flex flex-col overflow-hidden">
+                  <div className="flex-1 min-w-0 bg-white dark:bg-[#050E1A] rounded-2xl border border-slate-200/90 dark:border-[#152A42] hover:dark:border-[#00D6B0]/30 shadow-2xs hover:shadow-xs transition-shadow flex flex-col overflow-hidden">
                     {/* MAIN CARD ROW */}
                     <div 
                       onClick={() => setExpandedId(isExpanded ? null : entry.id)}
@@ -758,10 +805,10 @@ export default function Timeline() {
                           <TimelineParameterIcon parameterName={entry.parameter} />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <h3 className="text-sm sm:text-base font-bold text-[#101B3D] dark:text-[#F1F5FB] tracking-tight leading-snug truncate">
+                          <h3 className="text-sm sm:text-base font-bold text-[#101B3D] dark:text-white tracking-tight leading-snug truncate">
                             {entry.displayName}
                           </h3>
-                          <p className="text-xs text-[#64748B] dark:text-[#8297B2] font-medium leading-tight mt-0.5 truncate">
+                          <p className="text-xs text-[#64748B] dark:text-[#788CA5] font-medium leading-tight mt-0.5 truncate">
                             {entry.category}
                           </p>
                         </div>
@@ -769,20 +816,20 @@ export default function Timeline() {
 
                       {/* SECTION 5C: MEASUREMENT VALUE */}
                       <div className="min-w-0">
-                        <p className="text-xl sm:text-2xl font-black text-[#101B3D] dark:text-[#F1F5FB] tracking-tight leading-none truncate">
+                        <p className="text-xl sm:text-2xl font-black text-[#101B3D] dark:text-white tracking-tight leading-none truncate">
                           {entry.value}
                         </p>
-                        <p className="text-xs text-[#64748B] dark:text-[#B4C4D8] font-medium leading-none mt-1 truncate">
+                        <p className="text-xs text-[#64748B] dark:text-[#8297B2] font-medium leading-none mt-1 truncate">
                           {entry.unit || 'unit'}
                         </p>
                       </div>
 
                       {/* SECTION 5D: REFERENCE RANGE */}
                       <div className="min-w-0">
-                        <p className="text-[11px] text-slate-400 dark:text-[#8297B2] font-medium leading-none mb-1">
+                        <p className="text-[11px] text-slate-400 dark:text-[#647A96] font-medium leading-none mb-1">
                           Reference Range
                         </p>
-                        <p className="text-xs sm:text-sm font-semibold text-slate-700 dark:text-[#B4C4D8] leading-tight truncate" title={entry.referenceRangeText}>
+                        <p className="text-xs sm:text-sm font-semibold text-slate-700 dark:text-[#94A9C2] leading-tight truncate" title={entry.referenceRangeText}>
                           {entry.referenceRangeText}
                         </p>
                       </div>
@@ -790,25 +837,25 @@ export default function Timeline() {
                       {/* SECTION 5E: CLINICAL STATUS BADGE */}
                       <div>
                         {entry.statusVariant === 'normal' && (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#ECFDF5] text-[#059669] border border-emerald-200 dark:bg-[#0B302B] dark:text-[#20D6A1] dark:border-[#176B58]">
+                          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-[#ECFDF5] text-[#059669] border border-emerald-200 dark:bg-[#00D6B0] dark:text-[#040D1A] dark:border-transparent">
                             <Check className="w-3.5 h-3.5 stroke-[2.5]" />
                             <span>Normal</span>
                           </span>
                         )}
                         {entry.statusVariant === 'high' && (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#FFFBEB] text-[#D97706] border border-amber-200 dark:bg-[#302719] dark:text-[#F5B942] dark:border-[#80652A]">
+                          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-[#FFFBEB] text-[#D97706] border border-amber-200 dark:bg-[#281B09] dark:text-[#F5A623] dark:border-[#7A5E1C]/60">
                             <span className="text-xs font-black">▲</span>
                             <span>High</span>
                           </span>
                         )}
                         {entry.statusVariant === 'low' && (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#FEF2F2] text-[#DC2626] border border-rose-200 dark:bg-[#321B27] dark:text-[#FF5368] dark:border-[#7A3043]">
+                          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-[#FEF2F2] text-[#DC2626] border border-rose-200 dark:bg-[#2D1017] dark:text-[#FF4D6D] dark:border-[#801826]/60">
                             <span className="text-xs font-black">▼</span>
                             <span>Low</span>
                           </span>
                         )}
                         {entry.statusVariant === 'unknown' && (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200 dark:bg-[#1A2635] dark:text-[#A6B8CF] dark:border-[#40536A]">
+                          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200 dark:bg-[#0B1B30] dark:text-[#8297B2] dark:border-[#152A42]">
                             <span>Unknown</span>
                           </span>
                         )}
@@ -817,47 +864,47 @@ export default function Timeline() {
                       {/* SECTION 5F: EXPAND/COLLAPSE CHEVRON */}
                       <div className="flex justify-end">
                         {isExpanded ? (
-                          <ChevronUp className="w-5 h-5 text-slate-400 dark:text-[#8297B2] group-hover:text-slate-600 dark:group-hover:text-[#F1F5FB] transition-colors" />
+                          <ChevronUp className="w-5 h-5 text-slate-400 dark:text-[#647A96] group-hover:text-slate-600 dark:group-hover:text-white transition-colors" />
                         ) : (
-                          <ChevronDown className="w-5 h-5 text-slate-400 dark:text-[#8297B2] group-hover:text-slate-600 dark:group-hover:text-[#F1F5FB] transition-colors" />
+                          <ChevronDown className="w-5 h-5 text-slate-400 dark:text-[#647A96] group-hover:text-slate-600 dark:group-hover:text-white transition-colors" />
                         )}
                       </div>
                     </div>
 
                     {/* EXPANDED DETAILS (NOTE: RAW SOURCE HAS BEEN COMPLETELY REMOVED!) */}
                     {isExpanded && (
-                      <div className="bg-[#F8FAFC] dark:bg-[#081421] border-t border-slate-100 dark:border-[#1B3044] p-4 sm:p-5 text-xs text-slate-700 dark:text-[#B4C4D8] space-y-3 animate-in fade-in">
+                      <div className="bg-[#F8FAFC] border-t border-slate-100 p-4 sm:p-5 text-xs text-slate-700 space-y-3 animate-in fade-in">
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                          <div className="bg-white dark:bg-[#0D1B2A] p-3 rounded-xl border border-slate-200/70 dark:border-[#20364A]">
-                            <span className="text-[10px] font-bold text-slate-400 dark:text-[#8297B2] uppercase tracking-wider block mb-0.5">
+                          <div className="bg-white p-3 rounded-xl border border-slate-200/70">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">
                               Source Document
                             </span>
-                            <span className="font-semibold text-slate-800 dark:text-[#F1F5FB] text-xs">
+                            <span className="font-semibold text-slate-800 text-xs">
                               {entry.reportName}
                             </span>
                           </div>
-                          <div className="bg-white dark:bg-[#0D1B2A] p-3 rounded-xl border border-slate-200/70 dark:border-[#20364A]">
-                            <span className="text-[10px] font-bold text-slate-400 dark:text-[#8297B2] uppercase tracking-wider block mb-0.5">
+                          <div className="bg-white p-3 rounded-xl border border-slate-200/70">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">
                               Quality Assurance
                             </span>
-                            <span className="inline-flex items-center gap-1 font-semibold text-emerald-700 dark:text-[#20D6A1] text-xs">
-                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-[#20D6A1]" />
+                            <span className="inline-flex items-center gap-1 font-semibold text-emerald-700 text-xs">
+                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
                               {entry.validationStatus} (Automated OCR Validated)
                             </span>
                           </div>
-                          <div className="bg-white dark:bg-[#0D1B2A] p-3 rounded-xl border border-slate-200/70 dark:border-[#20364A]">
-                            <span className="text-[10px] font-bold text-slate-400 dark:text-[#8297B2] uppercase tracking-wider block mb-0.5">
+                          <div className="bg-white p-3 rounded-xl border border-slate-200/70">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">
                               Target Threshold
                             </span>
-                            <span className="font-semibold text-slate-800 dark:text-[#F1F5FB] text-xs">
+                            <span className="font-semibold text-slate-800 text-xs">
                               {entry.referenceRangeText}
                             </span>
                           </div>
                         </div>
 
                         {entry.sourceText && (
-                          <div className="bg-white dark:bg-[#0D1B2A] p-3 rounded-xl border border-slate-200/70 dark:border-[#20364A] text-[11px] text-slate-600 dark:text-[#B4C4D8]">
-                            <strong className="text-slate-700 dark:text-[#F1F5FB] block mb-0.5">Laboratory Report Context:</strong>
+                          <div className="bg-white p-3 rounded-xl border border-slate-200/70 text-[11px] text-slate-600">
+                            <strong className="text-slate-700 block mb-0.5">Laboratory Report Context:</strong>
                             <p className="italic">{entry.sourceText}</p>
                           </div>
                         )}
@@ -874,36 +921,31 @@ export default function Timeline() {
   );
 }
 
-// Icon Style helper with subtle tinted dark-mode containers matching reference palette
+// Icon Style helper
 function getParameterIconStyle(parameterName: string): string {
   const norm = normalizeParamKey(parameterName);
   switch (norm) {
     case 'hemoglobin':
     case 'rbc':
-      return 'bg-rose-50 text-rose-500 dark:bg-[#321B27] dark:text-[#FF5368]';
+      return 'bg-rose-50 text-rose-500 dark:bg-[#2D1017] dark:text-[#FF4D6D] dark:border dark:border-[#801826]/50';
     case 'wbc':
-      return 'bg-indigo-50 text-indigo-500 dark:bg-[#1E1F42] dark:text-[#8957FF]';
+      return 'bg-indigo-50 text-indigo-500 dark:bg-[#121A3B] dark:text-[#818CF8] dark:border dark:border-[#202D63]';
     case 'platelets':
-      return 'bg-amber-50 text-amber-500 dark:bg-[#302719] dark:text-[#F5B942]';
+      return 'bg-amber-50 text-amber-500 dark:bg-[#281B09] dark:text-[#F5A623] dark:border dark:border-[#7A5E1C]/60';
     case 'creatinine':
-      return 'bg-emerald-50 text-emerald-500 dark:bg-[#0B302B] dark:text-[#20D6A1]';
+      return 'bg-emerald-50 text-emerald-500 dark:bg-[#042724] dark:text-[#00D6B0] dark:border dark:border-[#00D6B0]/40';
     case 'fasting_glucose':
-      return 'bg-amber-50 text-amber-500 dark:bg-[#302719] dark:text-[#F5B942]';
+      return 'bg-amber-50 text-amber-500 dark:bg-[#281B09] dark:text-[#F5A623] dark:border dark:border-[#7A5E1C]/60';
     case 'hdl':
     case 'ldl':
     case 'total_cholesterol':
     case 'triglycerides':
-      return 'bg-purple-50 text-purple-600 dark:bg-[#2A1B3D] dark:text-[#8957FF]';
+      return 'bg-purple-50 text-purple-600 dark:bg-[#22123B] dark:text-[#A855F7] dark:border dark:border-[#552586]';
     case 'alt':
     case 'ast':
-      return 'bg-rose-50 text-rose-500 dark:bg-[#321B27] dark:text-[#FF5368]';
-    case 'blood_pressure':
-    case 'systolic_bp':
-    case 'diastolic_bp':
-    case 'heart_rate':
-      return 'bg-rose-50 text-rose-500 dark:bg-[#321B27] dark:text-[#FF5368]';
+      return 'bg-rose-50 text-rose-500 dark:bg-[#2D1017] dark:text-[#FF4D6D] dark:border dark:border-[#801826]/50';
     default:
-      return 'bg-blue-50 text-blue-600 dark:bg-[#0B2545]/60 dark:text-[#2684FF]';
+      return 'bg-blue-50 text-blue-600 dark:bg-[#081B38] dark:text-[#2684FF] dark:border dark:border-[#1B4582]';
   }
 }
 
@@ -963,16 +1005,6 @@ function TimelineParameterIcon({ parameterName }: { parameterName: string }) {
     case 'total_cholesterol':
     case 'triglycerides':
       return <HeartPulse className="w-5 h-5" />;
-
-    case 'blood_pressure':
-    case 'systolic_bp':
-    case 'diastolic_bp':
-    case 'heart_rate':
-      return (
-        <svg viewBox="0 0 24 24" className="w-5 h-5 stroke-[2]" fill="none" stroke="currentColor">
-          <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>
-        </svg>
-      );
 
     case 'alt':
     case 'ast':
