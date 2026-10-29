@@ -66,6 +66,11 @@ app.use(cors({
         return callback(null, true);
       }
 
+      // Exact Vercel deployment domains (*.vercel.app)
+      if (parsed.protocol === 'https:' && (parsed.hostname.endsWith('.vercel.app') || parsed.hostname === 'vercel.app')) {
+        return callback(null, true);
+      }
+
       return callback(new Error(`CORS origin not allowed: ${origin}`));
     } catch {
       return callback(new Error(`Malformed CORS origin: ${origin}`));
@@ -109,7 +114,7 @@ const CACHE_TTL_MS = 60 * 1000;
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const dir = './uploads';
+    const dir = process.env.VERCEL ? path.join('/tmp', 'uploads') : './uploads';
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     cb(null, dir);
   },
@@ -3945,4 +3950,10 @@ async function startServer() {
   });
 }
 
-startServer();
+// Only start standalone HTTP server when not running in Vercel serverless environment
+if (!process.env.VERCEL) {
+  startServer();
+}
+
+export { app, initDb, startServer };
+export default app;
